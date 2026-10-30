@@ -15,7 +15,9 @@ namespace PyTools.Core
         public string Hotkey = "Ctrl+Shift+Space";
         public bool AutoStart = true;
         public bool ClipboardHotkeyEnabled = false;
-        public string ClipboardHotkey = "Alt+B";
+        // M3：默认留空（不预设键位）。config.json 里已有的值原样读取，不迁移不改判——键位是用户数据，
+        // 哪怕来自旧版本的默认值也让用户自己判断（2026-10-30 用户拍板）。空串 = 未设置、不注册。
+        public string ClipboardHotkey = "";
         public List<string> AppDirs = new List<string>();
         public bool AddAppContextMenu = false;
         public double BoundsX = double.NaN, BoundsY = double.NaN, BoundsWidth = 640, BoundsHeight = 420;
@@ -24,6 +26,7 @@ namespace PyTools.Core
         public bool LiteMode = false;
         public bool PinyinSearch = true;   // 拼音首字母搜索（M2a，L7）
         public int PageStep = 5;           // Ctrl+N/P 步进条数（M2a，L6）
+        public bool ClipboardPrivacyFilter = true; // 剪贴板隐私格式过滤（M3）
 
         private readonly string _path;
         private Dictionary<string, object> _raw = new Dictionary<string, object>();
@@ -60,6 +63,7 @@ namespace PyTools.Core
             PinyinSearch = GetBool("v2.pinyinSearch", PinyinSearch);
             PageStep = (int)GetNumber(_raw, "v2.pageStep", PageStep);
             if (PageStep < 1) PageStep = 1;
+            ClipboardPrivacyFilter = GetBool("v2.clipboardPrivacyFilter", ClipboardPrivacyFilter);
 
             var bounds = _raw.ContainsKey("windowBounds") ? _raw["windowBounds"] as Dictionary<string, object> : null;
             if (bounds != null)
@@ -112,6 +116,7 @@ namespace PyTools.Core
             _raw["v2.liteMode"] = LiteMode;
             _raw["v2.pinyinSearch"] = PinyinSearch;
             _raw["v2.pageStep"] = PageStep;
+            _raw["v2.clipboardPrivacyFilter"] = ClipboardPrivacyFilter;
             var dir = Path.GetDirectoryName(_path);
             if (!string.IsNullOrEmpty(dir)) System.IO.Directory.CreateDirectory(dir);
             File.WriteAllText(_path, _serializer.Serialize(_raw));

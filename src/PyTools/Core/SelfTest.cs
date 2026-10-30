@@ -2,6 +2,9 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using System.Windows;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using PyTools.Native;
 
 namespace PyTools.Core
@@ -243,6 +246,170 @@ namespace PyTools.Core
                 finally { try { File.Delete(file); } catch { } }
             }));
 
+            // ---- M3 剪贴板历史 ----
+
+            results.Add(Test("热键解析：Win+V / Alt+B", () =>
+            {
+                uint mods, vk; string err;
+                if (!HotkeyParser.TryParse("Win+V", out mods, out vk, out err)) return "Win+V: " + err;
+                if (mods != NativeMethods.ModWin || vk != 0x56) return "Win+V -> mods=" + mods + " vk=" + vk;
+                if (!HotkeyParser.TryParse("Alt+B", out mods, out vk, out err)) return "Alt+B: " + err;
+                return (mods == NativeMethods.ModAlt && vk == 0x42) ? null : "Alt+B -> mods=" + mods + " vk=" + vk;
+            }));
+
+            results.Add(Test("配置：剪贴板默认值（键位留空 / 未启用 / 隐私过滤开）", () =>
+            {
+                var path = Path.Combine(Path.GetTempPath(), "pytools-selftest-" + Guid.NewGuid().ToString("N") + ".json");
+                try
+                {
+                    var cfg = AppConfig.Load(path);
+                    if (cfg.ClipboardHotkey != "") return "默认热键应为空串，实为: " + cfg.ClipboardHotkey;
+                    if (cfg.ClipboardHotkeyEnabled) return "默认应为未启用";
+                    return cfg.ClipboardPrivacyFilter ? null : "默认应开启隐私过滤";
+                }
+                finally { try { File.Delete(path); } catch { } }
+            }));
+
+            results.Add(Test("配置：已有剪贴板键位原样读取（不迁移不改判）", () =>
+            {
+                var path = Path.Combine(Path.GetTempPath(), "pytools-selftest-" + Guid.NewGuid().ToString("N") + ".json");
+                try
+                {
+                    File.WriteAllText(path, "{\"clipboardHotkey\":\"Alt+B\",\"clipboardHotkeyEnabled\":true}");
+                    var cfg = AppConfig.Load(path);
+                    if (cfg.ClipboardHotkey != "Alt+B") return "键位被改写: " + cfg.ClipboardHotkey;
+                    return cfg.ClipboardHotkeyEnabled ? null : "启用状态丢失";
+                }
+                finally { try { File.Delete(path); } catch { } }
+            }));
+
+            results.Add(Test("剪贴板：文本捕获与同内容去重", () =>
+            {
+                var dir = TempClipDir();
+                try
+                {
+                    var history = new ClipboardHistory(dir);
+                    string reason;
+                    var data = new DataObject();
+                    data.SetData(DataFormats.UnicodeText, "hello world");
+                    if (history.Capture(data, out reason) == null) return "首次未捕获: " + reason;
+                    if (history.Records.Count != 1) return "count=" + history.Records.Count;
+                    if (history.Capture(data, out reason) != null || reason != "duplicate") return "重复未判重: " + reason;
+                    return history.Records.Count == 1 ? null : "判重后 count=" + history.Records.Count;
+                }
+                finally { TryDeleteDir(dir); }
+            }));
+
+            results.Add(Test("剪贴板：超 100 条淘汰最旧", () =>
+            {
+                var dir = TempClipDir();
+                try
+                {
+                    var history = new ClipboardHistory(dir);
+                    string reason;
+                    for (var i = 0; i <= ClipboardHistory.MaxRecords; i++)
+                    {
+                        var data = new DataObject();
+                        data.SetData(DataFormats.UnicodeText, "t" + i);
+                        history.Capture(data, out reason);
+                    }
+                    if (history.Records.Count != ClipboardHistory.MaxRecords) return "count=" + history.Records.Count;
+                    foreach (var record in history.Records)
+                        if (record.Text == "t0") return "最旧记录未被淘汰";
+                    var tail = history.Records[history.Records.Count - 1].Text;
+                    return tail == "t1" ? null : "尾部应为 t1，实为 " + tail;
+                }
+                finally { TryDeleteDir(dir); }
+            }));
+
+            results.Add(Test("剪贴板：超长文本整条不记录", () =>
+            {
+                var dir = TempClipDir();
+                try
+                {
+                    var history = new ClipboardHistory(dir);
+                    string reason;
+                    var data = new DataObject();
+                    data.SetData(DataFormats.UnicodeText, new string('x', (int)ClipboardHistory.MaxTextChars + 1));
+                    var record = history.Capture(data, out reason);
+                    if (record != null) return "超长文本被记录";
+                    return reason == "text-too-large" ? null : "reason=" + reason;
+                }
+                finally { TryDeleteDir(dir); }
+            }));
+
+            results.Add(Test("剪贴板：隐私格式拦截与开关", () =>
+            {
+                var dir = TempClipDir();
+                try
+                {
+                    var history = new ClipboardHistory(dir) { PrivacyFilter = true };
+                    string reason;
+                    var data = new DataObject();
+                    data.SetData(DataFormats.UnicodeText, "secret");
+                    data.SetData(ClipboardHistory.ExcludeFormat, 1);
+                    if (history.Capture(data, out reason) != null) return "隐私格式未被拦截";
+                    if (reason != "privacy-exclude") return "reason=" + reason;
+                    history.PrivacyFilter = false;
+                    return history.Capture(data, out reason) != null ? null : "开关关闭后仍被拦截: " + reason;
+                }
+                finally { TryDeleteDir(dir); }
+            }));
+
+            results.Add(Test("剪贴板：图片捕获、PNG 落盘、缩略图解码", () =>
+            {
+                var dir = TempClipDir();
+                try
+                {
+                    var history = new ClipboardHistory(dir);
+                    string reason;
+                    var data = new DataObject();
+                    data.SetData(DataFormats.Bitmap, new WriteableBitmap(8, 6, 96, 96, PixelFormats.Bgr32, null));
+                    var record = history.Capture(data, out reason);
+                    if (record == null) return "图片未捕获: " + reason;
+                    if (record.Kind != ClipKind.Image) return "类型=" + record.Kind;
+                    if (!File.Exists(history.ImageFile(record.Id))) return "PNG 未落盘";
+                    var thumb = history.GetThumbnail(record);
+                    if (thumb == null) return "缩略图解码失败";
+                    if (thumb.PixelWidth > ClipboardHistory.ThumbDecodeEdge) return "缩略图未缩放: " + thumb.PixelWidth;
+                    return record.Subtitle.Length > 0 ? null : "副标题为空";
+                }
+                finally { TryDeleteDir(dir); }
+            }));
+
+            results.Add(Test("剪贴板：预览截断到 200 字", () =>
+            {
+                var record = new ClipRecord { Kind = ClipKind.Text, Text = new string('a', 300) };
+                var preview = record.Preview;
+                if (preview.Length != ClipboardHistory.MaxPreviewChars + 1) return "len=" + preview.Length;
+                return preview.EndsWith("…") ? null : "缺少省略号";
+            }));
+
+            results.Add(Test("剪贴板：v1 数据兼容 + 孤儿 PNG 清理", () =>
+            {
+                var dir = TempClipDir();
+                try
+                {
+                    var images = Path.Combine(dir, "clipboard-history", "images");
+                    Directory.CreateDirectory(images);
+                    var png = MakePngBytes();
+                    File.WriteAllBytes(Path.Combine(images, "img1.png"), png);
+                    File.WriteAllBytes(Path.Combine(images, "orphan.png"), png);
+                    File.WriteAllText(Path.Combine(dir, "clipboard-history.json"),
+                        "{\"version\":1,\"records\":["
+                        + "{\"id\":\"t1\",\"type\":\"text\",\"createdAt\":1,\"updatedAt\":3,\"text\":\"hi\"},"
+                        + "{\"id\":\"img1\",\"type\":\"image\",\"createdAt\":1,\"updatedAt\":2,\"imageFile\":\"img1.png\"},"
+                        + "{\"id\":\"bad\",\"type\":\"unknown\"}]}");
+
+                    var history = new ClipboardHistory(dir);
+                    if (history.Records.Count != 2) return "记录数=" + history.Records.Count;
+                    if (history.Records[0].Id != "t1") return "排序错，首位=" + history.Records[0].Id;
+                    if (File.Exists(Path.Combine(images, "orphan.png"))) return "孤儿 PNG 未清理";
+                    return File.Exists(Path.Combine(images, "img1.png")) ? null : "有效 PNG 被误删";
+                }
+                finally { TryDeleteDir(dir); }
+            }));
+
             var failed = 0;
             var lines = new List<string>();
             foreach (var r in results)
@@ -262,6 +429,29 @@ namespace PyTools.Core
             }
             catch { /* 落盘失败不影响退出码语义 */ }
             return failed == 0 ? 0 : 1;
+        }
+
+        private static string TempClipDir()
+        {
+            var dir = Path.Combine(Path.GetTempPath(), "pytools-selftest-clip-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+            return dir;
+        }
+
+        private static void TryDeleteDir(string dir)
+        {
+            try { Directory.Delete(dir, true); } catch { }
+        }
+
+        private static byte[] MakePngBytes()
+        {
+            var encoder = new PngBitmapEncoder();
+            encoder.Frames.Add(BitmapFrame.Create(new WriteableBitmap(2, 2, 96, 96, PixelFormats.Bgr32, null)));
+            using (var stream = new MemoryStream())
+            {
+                encoder.Save(stream);
+                return stream.ToArray();
+            }
         }
 
         private static Result Test(string name, Func<string> body)

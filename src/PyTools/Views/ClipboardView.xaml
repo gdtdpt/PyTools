@@ -1,0 +1,152 @@
+<UserControl x:Class="PyTools.Views.ClipboardView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:core="clr-namespace:PyTools.Core">
+    <!-- 剪贴板视图（M3，C2）：与启动器共用同一呼出壳（切 Content），令牌与行样式一致。
+         与应用列表的区别：空查询 = 显示全部记录（应用列表是空查询不显示）。 -->
+    <UserControl.Resources>
+        <core:EmptyToVisibilityConverter x:Key="EmptyToVisible"/>
+        <BooleanToVisibilityConverter x:Key="BoolToVisible"/>
+    </UserControl.Resources>
+    <Border Background="{DynamicResource Bg.Window}"
+            BorderBrush="{DynamicResource Border.Window}"
+            BorderThickness="1"
+            CornerRadius="{DynamicResource Radius.Window}"
+            Effect="{DynamicResource Fx.WindowShadow}">
+        <Grid x:Name="ContentGrid">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <Border Grid.Row="0"
+                    Background="{DynamicResource Bg.Input}"
+                    BorderBrush="{DynamicResource Border.Input}"
+                    BorderThickness="0,0,0,1"
+                    Padding="{DynamicResource Layout.SearchPadding}">
+                <Grid>
+                    <TextBox x:Name="PART_SearchBox"
+                             Height="{DynamicResource Layout.SearchBoxHeight}"
+                             FontSize="{DynamicResource Font.Base}"
+                             Foreground="{DynamicResource Text.Primary}"
+                             CaretBrush="{DynamicResource Text.Primary}"
+                             Background="Transparent"
+                             BorderThickness="0"
+                             VerticalContentAlignment="Center"/>
+                    <TextBlock x:Name="PART_Placeholder"
+                               Text="搜索剪贴板记录…"
+                               Margin="2,0,0,0"
+                               VerticalAlignment="Center"
+                               IsHitTestVisible="False"
+                               Foreground="{DynamicResource Text.Placeholder}"
+                               FontSize="{DynamicResource Font.Base}"
+                               Visibility="{Binding Text, ElementName=PART_SearchBox, Converter={StaticResource EmptyToVisible}}"/>
+                </Grid>
+            </Border>
+
+            <Grid Grid.Row="1" x:Name="ListArea">
+                <ListBox x:Name="PART_List"
+                         MaxHeight="{DynamicResource Layout.ListMaxHeight}"
+                         Background="Transparent"
+                         BorderThickness="0"
+                         Padding="0,2,0,4"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                         ScrollViewer.VerticalScrollBarVisibility="Auto"
+                         VirtualizingPanel.IsVirtualizing="True"
+                         VirtualizingPanel.VirtualizationMode="Recycling"
+                         SelectionMode="Single">
+                    <ListBox.ItemContainerStyle>
+                        <Style TargetType="ListBoxItem">
+                            <Setter Property="Padding" Value="0"/>
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="ListBoxItem">
+                                        <Border x:Name="Bd"
+                                                Background="Transparent"
+                                                CornerRadius="{DynamicResource Radius.Control}"
+                                                Margin="{DynamicResource Layout.ItemMargin}"
+                                                Padding="0">
+                                            <ContentPresenter/>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Bg.ItemHover}"/>
+                                            </Trigger>
+                                            <Trigger Property="IsSelected" Value="True">
+                                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Bg.ItemSelected}"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                        </Style>
+                    </ListBox.ItemContainerStyle>
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Height="{DynamicResource Layout.ItemHeight}" Background="Transparent">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="26"/>
+                                    <ColumnDefinition Width="32"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <!-- 角标：锚定可视区，滚动后对可见行重编号（与应用列表同一条规则） -->
+                                <TextBlock Grid.Column="0"
+                                           Text="{Binding Badge}"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"
+                                           Foreground="{DynamicResource Text.Placeholder}"
+                                           FontSize="{DynamicResource Font.Secondary}"/>
+                                <Grid Grid.Column="1" VerticalAlignment="Center">
+                                    <!-- 图片：缩略图（解码期缩放，不解全尺寸） -->
+                                    <Image Source="{Binding Thumb}"
+                                           Width="28" Height="28"
+                                           Stretch="Uniform"
+                                           Visibility="{Binding IsImage, Converter={StaticResource BoolToVisible}}"
+                                           RenderOptions.BitmapScalingMode="HighQuality"/>
+                                    <!-- 文本 / 文件：类型字符占位块 -->
+                                    <Border Width="28" Height="28"
+                                            CornerRadius="{DynamicResource Radius.Control}"
+                                            Background="{DynamicResource Bg.ItemHover}">
+                                        <Border.Style>
+                                            <Style TargetType="Border">
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsImage}" Value="True">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+                                        <TextBlock Text="{Binding Glyph}"
+                                                   HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center"
+                                                   FontSize="{DynamicResource Font.Secondary}"
+                                                   Foreground="{DynamicResource Text.Secondary}"/>
+                                    </Border>
+                                </Grid>
+                                <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="0,0,10,0">
+                                    <TextBlock Text="{Binding Title}"
+                                               FontSize="{DynamicResource Font.Base}"
+                                               Foreground="{DynamicResource Text.Primary}"
+                                               TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock Text="{Binding Subtitle}"
+                                               FontSize="{DynamicResource Font.Secondary}"
+                                               Foreground="{DynamicResource Text.Secondary}"
+                                               TextTrimming="CharacterEllipsis"
+                                               Margin="0,1,0,0"/>
+                                </StackPanel>
+                            </Grid>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+                <TextBlock x:Name="EmptyHint"
+                           Text="暂无剪贴板记录"
+                           Margin="0,14"
+                           HorizontalAlignment="Center"
+                           Foreground="{DynamicResource Text.Secondary}"
+                           FontSize="{DynamicResource Font.Secondary}"
+                           Visibility="Collapsed"/>
+            </Grid>
+        </Grid>
+    </Border>
+</UserControl>

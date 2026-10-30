@@ -13,7 +13,7 @@ using PyTools.Core;
 namespace PyTools.Views
 {
     /// <summary>结果条目视图模型：图标异步填充、角标锚定可视区（滚动后对可见行重编号）。</summary>
-    public sealed class ItemVM : INotifyPropertyChanged
+    public sealed class ItemVM : INotifyPropertyChanged, IBadgedItem
     {
         private string _badge = "";
         private BitmapImage _icon;
@@ -37,7 +37,7 @@ namespace PyTools.Views
         public event PropertyChangedEventHandler PropertyChanged;
     }
 
-    public partial class SummonView : UserControl
+    public partial class SummonView : UserControl, ISearchFocusable
     {
         /// <summary>操作菜单动作定义（v1 createAppActions 七项 + 移除登记，2026-10-30 用户确认）。</summary>
         private static readonly string[][] ActionDefs = new[]
@@ -67,7 +67,7 @@ namespace PyTools.Views
             PART_List.PreviewMouseLeftButtonUp += OnListClick;
             SearchBox.TextChanged += delegate { if (_actionMode) RefreshActions(); else RefreshResults(); };
             PreviewKeyDown += OnViewPreviewKeyDown;
-            Loaded += delegate { _scroll = FindScroll(PART_List); };
+            Loaded += delegate { _scroll = ListBadgeHelper.FindScroll(PART_List); };
         }
 
         /// <summary>索引（App 注入）。null 时搜索无结果。</summary>
@@ -381,61 +381,23 @@ namespace PyTools.Views
             if (index >= 0) { ActivateAt(index); e.Handled = true; }
         }
 
-        // ---- 可视区角标（数字锚定可视区：滚动后对可见行重编号，任意位置每行都有号可按）----
+        // ---- 可视区角标（规则见 ListBadgeHelper，与剪贴板列表共用同一份实现）----
 
-        /// <summary>第一个可见条目的索引。不按行高估算（行高含边距/DPI 缩放，估算必偏），
-        /// 而是从虚拟化面板已实现的容器里找「露出 ≥60%」的最小索引——只露一条缝的行不算，
-        /// 保证 1 号永远落在用户眼中完整的第一行。</summary>
+        /// <summary>第一个可见条目的索引（「露出 ≥60%」判定，不按行高估算）。</summary>
         private int FirstVisibleIndex()
         {
-            if (_scroll == null || _items.Count == 0) return 0;
-            var generator = PART_List.ItemContainerGenerator;
-            for (var i = 0; i < _items.Count; i++)
-            {
-                var container = generator.ContainerFromIndex(i) as FrameworkElement;
-                if (container == null) continue; // 虚拟化未实现（视口之外）
-                double top;
-                try { top = container.TransformToVisual(_scroll).Transform(new Point(0, 0)).Y; }
-                catch (InvalidOperationException) { continue; }
-                if (top > -container.ActualHeight * 0.4) return i;
-            }
-            return 0;
+            return ListBadgeHelper.FirstVisibleIndex(PART_List, _scroll, _items.Count);
         }
 
         private void OnListScrollChanged(object sender, ScrollChangedEventArgs e)
         {
-            if (_scroll == null) _scroll = FindScroll(PART_List);
+            if (_scroll == null) _scroll = ListBadgeHelper.FindScroll(PART_List);
             UpdateBadges(FirstVisibleIndex());
         }
 
         private void UpdateBadges(int firstVisible)
         {
-            for (var i = 0; i < _items.Count; i++)
-            {
-                var offset = i - firstVisible;
-                if (offset >= 0 && offset <= 9)
-                {
-                    _items[i].Badge = offset == 9 ? "0" : (offset + 1).ToString();
-                }
-                else
-                {
-                    _items[i].Badge = "";
-                }
-            }
-        }
-
-        private static ScrollViewer FindScroll(DependencyObject root)
-        {
-            var count = VisualTreeHelper.GetChildrenCount(root);
-            for (var i = 0; i < count; i++)
-            {
-                var child = VisualTreeHelper.GetChild(root, i);
-                var scroll = child as ScrollViewer;
-                if (scroll != null) return scroll;
-                scroll = FindScroll(child);
-                if (scroll != null) return scroll;
-            }
-            return null;
+            ListBadgeHelper.UpdateBadges(_items, firstVisible);
         }
 
         protected override void OnRenderSizeChanged(SizeChangedInfo sizeInfo)

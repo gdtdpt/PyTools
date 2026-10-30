@@ -33,10 +33,11 @@ namespace PyTools.Windows
             }
         }
 
+        /// <summary>把焦点交给内容视图的搜索框（启动器视图 / 剪贴板视图各自实现）。</summary>
         public void FocusSearch()
         {
-            var view = Content as Views.SummonView;
-            if (view != null) view.FocusSearch();
+            var focusable = Content as Views.ISearchFocusable;
+            if (focusable != null) focusable.FocusSearch();
         }
     }
 }

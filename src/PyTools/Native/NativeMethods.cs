@@ -46,6 +46,21 @@ namespace PyTools.Native
 
         public const uint AttachParentProcess = 0xFFFFFFFF;
 
+        // ---- 剪贴板监听（M3）----
+
+        public const int WmClipboardUpdate = 0x031D;
+        public const int ErrorHotkeyAlreadyRegistered = 1409;
+        public const uint ModNoRepeat = 0x4000;
+
+        /// <summary>剪贴板内容变化时向窗口投递 WM_CLIPBOARDUPDATE。窗口须为顶层窗口。</summary>
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool AddClipboardFormatListener(IntPtr hwnd);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool RemoveClipboardFormatListener(IntPtr hwnd);
+
         public static void TryAttachConsole()
         {
             try { AttachConsole(AttachParentProcess); }

@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
@@ -27,6 +28,12 @@ namespace PyTools
         private TrayController _tray;
         private SummonWindowBase _window;
         private SummonView _view;
+        private ClipboardView _clipView;
+        private ClipboardHistory _clipHistory;
+        private ClipboardWatcher _clipWatcher;
+        private bool _clipboardRegistered;
+        private bool _hiding; // 收起动画进行中，防重复触发
+        private ClipRecord _pendingWriteBack; // 收起并恢复焦点后才写回剪贴板
         private AppIndex _index;
         private bool _bubbleNextScan; // 手动重扫后气泡反馈（首扫不气泡）
         private string _debugQuery;   // --debug 配套 --query=<词>：呼出即预填搜索（UI 截图自验用）
@@ -108,6 +115,18 @@ namespace PyTools
                 _view.PageStep = _config.PageStep;
                 _view.LaunchRequested += OnLaunchRequested;
                 _view.ActionRequested += OnActionRequested;
+
+                // 剪贴板历史（M3）：历史数据 + 监听 + 直呼视图。视图与启动器共用同一呼出壳（切 Content），
+                // 焦点恢复/动效/位置记忆全部复用，不新建窗口。
+                _clipHistory = new ClipboardHistory(AppDirectory) { PrivacyFilter = _config.ClipboardPrivacyFilter };
+                _clipView = new ClipboardView { History = _clipHistory, PageStep = _config.PageStep };
+                // 壳的 Margin 是阴影呼吸区（DropShadowEffect 画在 Border 之外，不留边距会被窗口边界裁切），
+                // 切 Content 时必须沿用同一份边距，否则剪贴板视图的圆角处会出现尖刺伪影。
+                if (_view != null) _clipView.Margin = _view.Margin;
+                _clipView.SelectRequested += OnClipboardSelectRequested;
+                _clipWatcher = new ClipboardWatcher(OnClipboardUpdate);
+                if (!_clipWatcher.Start()) Logger.Error("clipboard watcher failed to start");
+
                 _window.Deactivated += (sender, eventArgs) =>
                 {
                     // M5 图钉在此挂钩：钉住时不响应失焦
@@ -124,11 +143,17 @@ namespace PyTools
                 {
                     _tray.ShowBubble("PyTools", "主热键注册失败：" + _config.Hotkey + "，可能已被占用");
                 }
-                if (_config.ClipboardHotkeyEnabled)
+                if (_config.ClipboardHotkeyEnabled && !string.IsNullOrEmpty(_config.ClipboardHotkey))
                 {
-                    // 剪贴板视图在 M3 提供；本期仅注册占位并记录，避免热键被其它程序占用
-                    RegisterHotkey(HotkeyIdClipboard, _config.ClipboardHotkey);
-                    Logger.Info("clipboard hotkey registered (view pending M3)");
+                    int errorCode;
+                    if (RegisterHotkey(HotkeyIdClipboard, _config.ClipboardHotkey, out errorCode))
+                    {
+                        _clipboardRegistered = true;
+                    }
+                    else
+                    {
+                        _tray.ShowBubble("PyTools", "剪贴板热键注册失败：" + DescribeHotkeyFailure(_config.ClipboardHotkey, errorCode));
+                    }
                 }
 
                 _single.ListenShow(_uiContext, ToggleSummon);
@@ -146,10 +171,13 @@ namespace PyTools
                 if (debug)
                 {
                     // 调试模式：启动即显示且禁用失焦隐藏（与 v1 --debug 语义一致）
-                    ShowSummon();
+                    if (args.Contains("--clipboard")) ShowClipboard();
+                    else ShowSummon();
                     if (_debugQuery != null)
                     {
-                        _view.SearchBox.Text = _debugQuery; // 触发 RefreshResults（截图自验结果态）
+                        // --query 配套当前视图：截图自验用
+                        if (args.Contains("--clipboard")) _clipView.SearchBox.Text = _debugQuery;
+                        else _view.SearchBox.Text = _debugQuery;
                     }
                 }
                 else if (_bootAddApp != null)
@@ -187,15 +215,25 @@ namespace PyTools
 
         private bool RegisterHotkey(int id, string text)
         {
+            int errorCode;
+            return RegisterHotkey(id, text, out errorCode);
+        }
+
+        private bool RegisterHotkey(int id, string text, out int errorCode)
+        {
+            errorCode = 0;
             uint mods, vk; string err;
             if (!HotkeyParser.TryParse(text, out mods, out vk, out err))
             {
                 Logger.Error("hotkey parse failed: " + text + " -> " + err);
+                errorCode = -1;
                 return false;
             }
             EnsureHotkeyWindow();
-            var ok = NativeMethods.RegisterHotKey(_hotkeyHwnd, id, mods, vk);
-            Logger.Info("register hotkey id=" + id + " \"" + text + "\" -> " + ok);
+            // MOD_NOREPEAT：长按不连发（主热键与剪贴板热键统一带）
+            var ok = NativeMethods.RegisterHotKey(_hotkeyHwnd, id, mods | NativeMethods.ModNoRepeat, vk);
+            if (!ok) errorCode = Marshal.GetLastWin32Error();
+            Logger.Info("register hotkey id=" + id + " \"" + text + "\" -> " + ok + (ok ? "" : " err=" + errorCode));
             return ok;
         }
 
@@ -217,7 +255,7 @@ namespace PyTools
             {
                 var id = wParam.ToInt32();
                 if (id == HotkeyIdMain) Dispatcher.Invoke(ToggleSummon);
-                else if (id == HotkeyIdClipboard) { /* M3：剪贴板直呼 */ }
+                else if (id == HotkeyIdClipboard) Dispatcher.Invoke(ToggleClipboard);
                 handled = true;
             }
             return IntPtr.Zero;
@@ -225,46 +263,91 @@ namespace PyTools
 
         // ---- 呼出 / 收起 ----
 
+        /// <summary>主热键：显示应用列表；已显示剪贴板视图时原地切回应用列表。</summary>
         private void ToggleSummon()
         {
-            if (_window != null && _window.IsVisible) HideSummon();
-            else ShowSummon();
+            if (_window == null) return;
+            if (_window.IsVisible && !_hiding)
+            {
+                if (ReferenceEquals(_window.Content, _view)) HideSummon();
+                else ShowSummon();
+                return;
+            }
+            ShowSummon();
         }
 
-        private bool _hiding; // 收起动画进行中，防重复触发
+        /// <summary>剪贴板热键：显示剪贴板视图；已显示应用列表时原地切换。</summary>
+        private void ToggleClipboard()
+        {
+            if (_window == null) return;
+            if (_window.IsVisible && !_hiding)
+            {
+                if (ReferenceEquals(_window.Content, _clipView)) HideSummon();
+                else ShowClipboard();
+                return;
+            }
+            ShowClipboard();
+        }
 
         private void ShowSummon()
         {
-            if (_window.IsVisible || _hiding) return;
+            ShowShell(_view, _view.ResetForSummon, "apps");
+        }
+
+        private void ShowClipboard()
+        {
+            ShowShell(_clipView, _clipView.ResetForClipboard, "clipboard");
+        }
+
+        /// <summary>
+        /// 呼出壳统一入口：切换内容视图 → （首次显示时）记录前台、定位、显示、淡入。
+        /// 两个视图共用同一份 windowBounds，所以切换视图时位置不变，只变高度（顶边锚定）。
+        /// </summary>
+        private void ShowShell(object content, Action reset, string tag)
+        {
+            if (_window == null || _hiding) return;
             var sw = Stopwatch.StartNew();
+            var alreadyVisible = _window.IsVisible;
 
-            // 呼出前记录前台（进程内同步调用，零开销）——焦点恢复的依据
-            _capturedTarget = Foreground.Capture();
-            _capturedForeground = true;
-            Logger.Debug("captured foreground=0x" + _capturedTarget.ToString("X"));
+            if (!alreadyVisible)
+            {
+                // 呼出前记录前台（进程内同步调用，零开销）——焦点恢复的依据
+                // 已在显示中切视图时**不能**重抓：此刻前台就是自己，重抓会导致收起时无处可恢复
+                _capturedTarget = Foreground.Capture();
+                _capturedForeground = true;
+                Logger.Debug("captured foreground=0x" + _capturedTarget.ToString("X"));
+                _hiding = false;
+            }
 
-            _hiding = false;
-            _view.ResetForSummon(); // 空态：只有搜索框（v1 同款），随后 EnsureOnScreen 的定位基于收缩后的实际尺寸
-            // 先置零透明度再显示：Show() 若以满透明度渲染首帧，随后的淡入会造成视觉闪跳
-            _window.Opacity = 0;
-            EnsureOnScreen();
-            _window.Show();
-            _window.Activate();
+            _window.Content = content;
+            reset();
+
+            if (!alreadyVisible)
+            {
+                // 先置零透明度再显示：Show() 若以满透明度渲染首帧，随后的淡入会造成视觉闪跳
+                _window.Opacity = 0;
+                EnsureOnScreen();
+                _window.Show();
+                _window.Activate();
+            }
             _window.FocusSearch();
 
-            var ms = GetTokenDouble("Motion.SummonMs");
-            if (ms > 0)
+            if (!alreadyVisible)
             {
-                var anim = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(ms)) { EasingFunction = new QuadraticEase() };
-                _window.BeginAnimation(UIElement.OpacityProperty, anim);
-            }
-            else
-            {
-                _window.Opacity = 1;
+                var ms = GetTokenDouble("Motion.SummonMs");
+                if (ms > 0)
+                {
+                    var anim = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(ms)) { EasingFunction = new QuadraticEase() };
+                    _window.BeginAnimation(UIElement.OpacityProperty, anim);
+                }
+                else
+                {
+                    _window.Opacity = 1;
+                }
             }
 
             sw.Stop();
-            Logger.Info("summon show elapsed=" + sw.ElapsedMilliseconds + "ms");
+            Logger.Info("summon show [" + tag + "] elapsed=" + sw.ElapsedMilliseconds + "ms");
         }
 
         private void HideSummon()
@@ -305,6 +388,9 @@ namespace PyTools
 
             sw.Stop();
             Logger.Info("summon hide elapsed=" + sw.ElapsedMilliseconds + "ms");
+
+            // 剪贴板回填：必须在焦点恢复之后才写——否则用户按 Ctrl+V 会粘回自己
+            FlushPendingWriteBack();
         }
 
         private void EnsureOnScreen()
@@ -321,6 +407,111 @@ namespace PyTools
                 top = SystemParameters.WorkArea.Height / 3 + virtualTop; // 高度动态化后默认位只按上三分之一锚定
             _window.Left = left;
             _window.Top = top;
+        }
+
+        // ---- 剪贴板历史（M3，C1-C4 + S9）----
+
+        /// <summary>列表里选中一条：先收起（含焦点恢复），再由 CompleteHide 触发写回。</summary>
+        private void OnClipboardSelectRequested(ClipRecord record)
+        {
+            if (record == null) return;
+            _pendingWriteBack = record;
+            if (_window != null && _window.IsVisible) HideSummon();
+            else FlushPendingWriteBack(); // 兜底：窗口已收起（如 --debug 场景）
+        }
+
+        /// <summary>把待回填记录写入剪贴板。时序硬性要求：必须在焦点恢复之后（见 §6）。</summary>
+        private void FlushPendingWriteBack()
+        {
+            var record = _pendingWriteBack;
+            _pendingWriteBack = null;
+            if (record == null || _clipHistory == null) return;
+            var error = _clipHistory.WriteBack(record);
+            if (error != null)
+            {
+                Logger.Error("clipboard writeback failed: " + error);
+                _tray.ShowBubble("PyTools", error);
+                return;
+            }
+            Logger.Info("clipboard writeback ok: " + record.KindLabel);
+            if (_clipView != null) _clipView.OnHistoryChanged();
+        }
+
+        /// <summary>剪贴板监听回调（UI 线程）：隐私过滤 → 去重 → 落盘 → 刷新视图。</summary>
+        private void OnClipboardUpdate(IDataObject data)
+        {
+            if (_clipHistory == null) return;
+            if (_clipHistory.InSelfWriteWindow)
+            {
+                Logger.Debug("clipboard update ignored (self write)");
+                return;
+            }
+            _clipHistory.PrivacyFilter = _config.ClipboardPrivacyFilter;
+            string skipReason;
+            var record = _clipHistory.Capture(data, out skipReason);
+            if (record == null)
+            {
+                if (skipReason != null && skipReason != "duplicate") Logger.Debug("clipboard skipped: " + skipReason);
+                return;
+            }
+            Logger.Info("clipboard captured: " + record.KindLabel);
+            if (_clipView != null) _clipView.OnHistoryChanged();
+        }
+
+        /// <summary>
+        /// 应用剪贴板直呼热键（设置窗口调用）。返回 null = 成功，否则错误文案。
+        /// key 由程序生成或用户录制；Win 组合只能由程序生成（WPF 录制不到 Win+V 的 V 键）。
+        /// </summary>
+        private string ApplyClipboardHotkey(string newHotkey, bool enabled)
+        {
+            var key = (newHotkey ?? "").Trim();
+            if (enabled && key.Length == 0) return "请先按下一个组合键，或点右侧「Win+V」";
+
+            uint mods, vk; string parseError;
+            if (enabled && !HotkeyParser.TryParse(key, out mods, out vk, out parseError)) return parseError;
+
+            // 与主热键相同：先判定，不交给系统报 1409（文案更有用）
+            if (enabled && string.Equals(key, _config.Hotkey, StringComparison.OrdinalIgnoreCase))
+                return "不能与主热键相同";
+
+            if (_clipboardRegistered && _hotkeyHwnd != IntPtr.Zero)
+            {
+                NativeMethods.UnregisterHotKey(_hotkeyHwnd, HotkeyIdClipboard);
+                _clipboardRegistered = false;
+            }
+
+            if (enabled)
+            {
+                int errorCode;
+                if (!RegisterHotkey(HotkeyIdClipboard, key, out errorCode))
+                {
+                    // 回滚：恢复原已注册的热键
+                    if (_config.ClipboardHotkeyEnabled && !string.IsNullOrEmpty(_config.ClipboardHotkey))
+                        _clipboardRegistered = RegisterHotkey(HotkeyIdClipboard, _config.ClipboardHotkey);
+                    return DescribeHotkeyFailure(key, errorCode);
+                }
+                _clipboardRegistered = true;
+            }
+
+            _config.ClipboardHotkey = key;
+            _config.ClipboardHotkeyEnabled = enabled;
+            _config.Save();
+            return null;
+        }
+
+        private static string DescribeHotkeyFailure(string key, int errorCode)
+        {
+            if (errorCode == NativeMethods.ErrorHotkeyAlreadyRegistered)
+            {
+                if (key.IndexOf("Win+", StringComparison.OrdinalIgnoreCase) == 0)
+                {
+                    return "已被系统或其他程序占用：Win10 1809+ 的系统剪贴板历史会占 Win+V，"
+                         + "可在「设置 → 系统 → 剪贴板」关闭后重试，或改用其他组合键";
+                }
+                return "已被系统或其他程序占用，请换一个组合键";
+            }
+            if (errorCode == -1) return "组合键格式不受支持";
+            return "注册失败（错误码 " + errorCode + "）";
         }
 
         // ---- 启动器（M2a）----
@@ -542,7 +733,7 @@ namespace PyTools
                 _settingsWindow.Activate();
                 return;
             }
-            _settingsWindow = new SettingsWindow(_config, _index, ApplyHotkey);
+            _settingsWindow = new SettingsWindow(_config, _index, ApplyHotkey, ApplyClipboardHotkey);
             _settingsWindow.Closed += (sender, eventArgs) => _settingsWindow = null;
             _settingsWindow.Show();
         }
@@ -573,6 +764,7 @@ namespace PyTools
                     NativeMethods.UnregisterHotKey(_hotkeyHwnd, HotkeyIdClipboard);
                 }
                 if (_hotkeySource != null) _hotkeySource.Dispose();
+                if (_clipWatcher != null) _clipWatcher.Dispose();
                 if (_window != null && _window.IsVisible)
                     _config.SaveBounds(_window.Left, _window.Top, _window.Width, _window.Height);
                 if (_tray != null) _tray.Dispose();
