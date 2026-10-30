@@ -19,6 +19,8 @@ namespace PyTools.Windows
             ShowInTaskbar = false;
             Topmost = true;
             ShowActivated = false;
+            // 动态高度（M2a）：空查询只有搜索框，有结果向下展开（顶边锚定），宽度仍由 App 按记忆设定
+            SizeToContent = SizeToContent.Height;
             PreviewKeyDown += OnPreviewKeyDown;
         }
 

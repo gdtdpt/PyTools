@@ -16,6 +16,8 @@
     <SolidColorBrush x:Key="Text.Secondary" Color="#6E7681"/>
     <SolidColorBrush x:Key="Text.Placeholder" Color="#9EA0A4"/>
     <SolidColorBrush x:Key="Accent" Color="#2F6BED"/>
+    <SolidColorBrush x:Key="Bg.Toast" Color="#323A48"/>
+    <SolidColorBrush x:Key="Text.OnToast" Color="#FFFFFF"/>
 
     <!-- 字号 -->
     <system:Double xmlns:system="clr-namespace:System;assembly=mscorlib" x:Key="Font.Base">14</system:Double>
@@ -34,5 +36,8 @@
 
     <!-- 布局 -->
     <system:Double xmlns:system="clr-namespace:System;assembly=mscorlib" x:Key="Layout.SearchBoxHeight">42</system:Double>
+    <system:Double xmlns:system="clr-namespace:System;assembly=mscorlib" x:Key="Layout.ItemHeight">48</system:Double>
+    <system:Double xmlns:system="clr-namespace:System;assembly=mscorlib" x:Key="Layout.ListMaxHeight">480</system:Double>
     <Thickness x:Key="Layout.SearchPadding">14,0,14,0</Thickness>
+    <Thickness x:Key="Layout.ItemMargin">8,2,8,2</Thickness>
 </ResourceDictionary>

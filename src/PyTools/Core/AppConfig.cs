@@ -22,6 +22,8 @@ namespace PyTools.Core
 
         // ---- v2 新增键（v2. 前缀）----
         public bool LiteMode = false;
+        public bool PinyinSearch = true;   // 拼音首字母搜索（M2a，L7）
+        public int PageStep = 5;           // Ctrl+N/P 步进条数（M2a，L6）
 
         private readonly string _path;
         private Dictionary<string, object> _raw = new Dictionary<string, object>();
@@ -55,6 +57,9 @@ namespace PyTools.Core
             ClipboardHotkey = GetString("clipboardHotkey", ClipboardHotkey);
             AddAppContextMenu = GetBool("addAppContextMenu", AddAppContextMenu);
             LiteMode = GetBool("v2.liteMode", LiteMode);
+            PinyinSearch = GetBool("v2.pinyinSearch", PinyinSearch);
+            PageStep = (int)GetNumber(_raw, "v2.pageStep", PageStep);
+            if (PageStep < 1) PageStep = 1;
 
             var bounds = _raw.ContainsKey("windowBounds") ? _raw["windowBounds"] as Dictionary<string, object> : null;
             if (bounds != null)
@@ -97,6 +102,9 @@ namespace PyTools.Core
             _raw["clipboardHotkey"] = ClipboardHotkey;
             _raw["appDirs"] = AppDirs;
             _raw["addAppContextMenu"] = AddAppContextMenu;
+            _raw["v2.liteMode"] = LiteMode;
+            _raw["v2.pinyinSearch"] = PinyinSearch;
+            _raw["v2.pageStep"] = PageStep;
             var dir = Path.GetDirectoryName(_path);
             if (!string.IsNullOrEmpty(dir)) System.IO.Directory.CreateDirectory(dir);
             File.WriteAllText(_path, _serializer.Serialize(_raw));

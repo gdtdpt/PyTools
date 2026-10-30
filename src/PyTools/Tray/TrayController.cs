@@ -16,6 +16,7 @@ namespace PyTools.Tray
 
         public event Action OpenRequested;
         public event Action ExitRequested;
+        public event Action RescanRequested;
 
         public void Init()
         {
@@ -28,9 +29,7 @@ namespace PyTools.Tray
 
             var menu = new ContextMenuStrip();
             menu.Items.Add("打开", null, (s, e) => Raise(OpenRequested));
-            var rescan = menu.Items.Add("重新扫描");
-            rescan.Enabled = false;
-            rescan.ToolTipText = "启动器内容扫描将在 M2 提供";
+            menu.Items.Add("重新扫描", null, (s, e) => Raise(RescanRequested));
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("退出", null, (s, e) => Raise(ExitRequested));
 

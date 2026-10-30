@@ -89,6 +89,118 @@ namespace PyTools.Core
                 return handle == IntPtr.Zero ? "(空会话，句柄为 0，合法)" : null;
             }));
 
+            // ---- M2a 启动器 ----
+
+            results.Add(Test("拼音表：加载与多音字集合", () =>
+            {
+                if (!Pinyin.Ready) return "内嵌拼音表未加载";
+                var zhong = Pinyin.LettersOf('重');
+                if (zhong != "ctz") return "重 → " + zhong;
+                var chang = Pinyin.LettersOf('长');
+                if (chang != "cz") return "长 → " + chang;
+                return null;
+            }));
+
+            results.Add(Test("拼音表：变体展开", () =>
+            {
+                var tx = Pinyin.Expand("腾讯会议");
+                if (!tx.Contains("txhy")) return "腾讯会议 未含 txhy";
+                var cq = Pinyin.Expand("重庆");
+                if (!cq.Contains("cq") || !cq.Contains("zq")) return "重庆 变体 = " + string.Join(",", cq);
+                var wps = Pinyin.Expand("WPS表格");
+                if (!wps.Contains("wpsbg")) return "WPS表格 变体 = " + string.Join(",", wps);
+                return null;
+            }));
+
+            results.Add(Test("分词：quote-aware splitArgs", () =>
+            {
+                var tokens = AppLauncher.SplitArgs("a \"b c\" d");
+                if (tokens.Count != 3) return "count=" + tokens.Count;
+                return tokens[1] == "b c" ? null : "token[1]=" + tokens[1];
+            }));
+
+            results.Add(Test("配置：v2.pinyinSearch / v2.pageStep", () =>
+            {
+                var path = Path.Combine(Path.GetTempPath(), "pytools-selftest-" + Guid.NewGuid().ToString("N") + ".json");
+                try
+                {
+                    File.WriteAllText(path, "{\"v2.pinyinSearch\":false,\"v2.pageStep\":3}");
+                    var cfg = AppConfig.Load(path);
+                    if (cfg.PinyinSearch) return "pinyinSearch 未读入";
+                    if (cfg.PageStep != 3) return "pageStep=" + cfg.PageStep;
+                    return null;
+                }
+                finally { try { File.Delete(path); } catch { } }
+            }));
+
+            results.Add(Test("扫描：身份键合并与登记覆盖", () =>
+            {
+                var root = Path.Combine(Path.GetTempPath(), "pytools-selftest-scan-" + Guid.NewGuid().ToString("N"));
+                var path = Path.Combine(Path.GetTempPath(), "pytools-selftest-apps-" + Guid.NewGuid().ToString("N") + ".json");
+                try
+                {
+                    Directory.CreateDirectory(root);
+                    var exe = Path.Combine(root, "foo.exe");
+                    File.WriteAllText(exe, "dummy"); // 扫描不校验 PE 内容
+                    var custom = new CustomApps(path);
+                    var added = custom.Add(exe);
+                    if (!added.Ok) return "登记失败: " + added.Reason;
+
+                    // 同 target 同 args → 登记覆盖扫描（1 条，IsCustom）
+                    var entries = AppScanner.Scan(new List<string> { root }, custom.Load());
+                    if (entries.Count != 1) return "合并后 " + entries.Count + " 条（期望 1）";
+                    if (!entries[0].IsCustom || entries[0].Name != "foo") return "覆盖未生效: " + entries[0].Name;
+
+                    // 登记副本带参数 → 不同身份键 → 2 条
+                    var data = custom.Load();
+                    data.Add(new CustomApp { Name = "foo -x", Path = exe, Args = "-x", AddedAt = added.Path });
+                    var two = AppScanner.Scan(new List<string> { root }, data);
+                    if (two.Count != 2) return "带参副本后 " + two.Count + " 条（期望 2）";
+                    return null;
+                }
+                finally
+                {
+                    try { Directory.Delete(root, true); } catch { }
+                    try { File.Delete(path); } catch { }
+                }
+            }));
+
+            results.Add(Test("启动：死条目移除登记（v1 1.8.1 语义）", () =>
+            {
+                var path = Path.Combine(Path.GetTempPath(), "pytools-selftest-dead-" + Guid.NewGuid().ToString("N") + ".json");
+                try
+                {
+                    var custom = new CustomApps(path);
+                    var ghost = Path.Combine(Path.GetTempPath(), "pytools-selftest-ghost-" + Guid.NewGuid().ToString("N") + ".exe");
+                    File.WriteAllText(ghost, "dummy");
+                    custom.Add(ghost); // 先登记真实存在的目标，再删除模拟"目标已消失"
+                    var entry = new AppEntry { Name = "ghost", Path = ghost, TargetPath = ghost, IsCustom = true };
+                    File.Delete(ghost);
+                    var result = AppLauncher.Open(entry, new List<string>(), custom);
+                    if (result == null || !result.Ok || !result.RemovedDeadEntry) return "未按移除语义返回";
+                    if (custom.Load().Count != 0) return "登记未被移除";
+                    return result.Message.Contains("移除") ? null : "提示文案: " + result.Message;
+                }
+                finally { try { File.Delete(path); } catch { } }
+            }));
+
+            results.Add(Test("授权：IsKnownApp 根目录前缀判定", () =>
+            {
+                var root = Path.Combine(Path.GetTempPath(), "pytools-selftest-known-" + Guid.NewGuid().ToString("N"));
+                try
+                {
+                    Directory.CreateDirectory(root);
+                    var inside = Path.Combine(root, "app.exe");
+                    var custom = new CustomApps(Path.Combine(Path.GetTempPath(), "pytools-selftest-none-" + Guid.NewGuid().ToString("N") + ".json"));
+                    if (!AppLauncher.IsKnownApp(inside, new List<string> { root }, custom)) return "根内未授权";
+                    if (AppLauncher.IsKnownApp(inside + ".bak", new List<string> { root }, custom)) return "非法扩展名被授权";
+                    var outside = Path.Combine(Path.GetTempPath(), "outside.exe");
+                    if (AppLauncher.IsKnownApp(outside, new List<string> { root }, custom)) return "根外被授权";
+                    return null;
+                }
+                finally { try { Directory.Delete(root, true); } catch { } }
+            }));
+
             var failed = 0;
             var lines = new List<string>();
             foreach (var r in results)

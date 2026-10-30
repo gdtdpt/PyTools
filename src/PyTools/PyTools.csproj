@@ -80,9 +80,18 @@
     <Compile Include="Core\SingleInstance.cs" />
     <Compile Include="Core\SelfTest.cs" />
     <Compile Include="Core\EmptyToVisibilityConverter.cs" />
+    <Compile Include="Core\NullToVisibilityConverter.cs" />
+    <Compile Include="Core\AppEntry.cs" />
+    <Compile Include="Core\AppIndex.cs" />
+    <Compile Include="Core\AppScanner.cs" />
+    <Compile Include="Core\AppLauncher.cs" />
+    <Compile Include="Core\CustomApps.cs" />
+    <Compile Include="Core\IconCache.cs" />
+    <Compile Include="Core\Pinyin.cs" />
     <Compile Include="Native\NativeMethods.cs" />
     <Compile Include="Native\HotkeyParser.cs" />
     <Compile Include="Native\Foreground.cs" />
+    <Compile Include="Native\ShellLink.cs" />
     <Compile Include="Tray\TrayController.cs" />
     <Compile Include="Windows\SummonWindowBase.cs" />
     <Compile Include="Windows\SummonWindow.xaml.cs">
@@ -107,6 +116,8 @@
   <ItemGroup>
     <!-- EmbeddedResource 保留 ICO 原始容器字节；WPF <Resource> 会把 .ico 转码为解码图像流，System.Drawing.Icon 构造会抛"参数 picture 必须是可用作 Icon 的图片" -->
     <EmbeddedResource Include="Assets\icon.ico" />
+    <!-- 拼音首字母表（mozillazg/pinyin-data 生成，见 Core/Pinyin.cs），运行时按 UTF-8 显式解码 -->
+    <EmbeddedResource Include="Assets\pinyin-initials.txt" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- WinFX.targets 由 Microsoft.NETFramework.CurrentVersion.targets(130) 在 TargetFrameworkVersion>=v3.0 时自动导入，勿重复导入（MSB4011） -->

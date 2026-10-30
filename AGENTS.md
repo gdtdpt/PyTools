@@ -23,12 +23,13 @@ PyTools v2：v1（Electron 启动器）的 .NET Framework 4.6.2 / WPF 重写版�
 
 | 路径 | 职责 |
 |---|---|
-| `src/PyTools/Native/` | Win32 P/Invoke（热键、前台、控制台）；纯静态，无 WPF 依赖 |
-| `src/PyTools/Core/` | 配置、日志、单实例、自测 |
+| `src/PyTools/Native/` | Win32 P/Invoke（热键、前台、控制台、ShellLink/lnk 解析）；纯静态，无 WPF 依赖 |
+| `src/PyTools/Core/` | 配置、日志、单实例、自测、启动器（AppIndex/AppScanner/AppLauncher/CustomApps/IconCache/Pinyin） |
 | `src/PyTools/Themes/` | 令牌层（基础 + 简洁覆盖） |
 | `src/PyTools/Views/` | 共用视图（被多种窗壳复用） |
 | `src/PyTools/Windows/` | 窗壳（透明/不透明），不含业务逻辑 |
 | `src/PyTools/Tray/` | 托盘与气泡 |
+| `src/PyTools/Assets/` | 图标 + 内嵌拼音首字母表（EmbeddedResource，勿改编码） |
 | `tools/build.ps1` | 构建（vswhere 定位 MSBuild） |
 
 ## 构建与自测
@@ -37,6 +38,7 @@ PyTools v2：v1（Electron 启动器）的 .NET Framework 4.6.2 / WPF 重写版�
 .\v2\tools\build.ps1 -Configuration Debug        # 构建
 .\v2\src\PyTools\bin\Debug\PyTools.exe --selftest # 逻辑自测（exit 0 = 全过）
 .\v2\src\PyTools\bin\Debug\PyTools.exe --debug    # 调试：启动即显示、禁失焦隐藏
+.\v2\src\PyTools\bin\Debug\PyTools.exe --debug --query=wx  # 调试 + 呼出即预填搜索词（UI 截图自验结果态）
 ```
 
 同机测试 v2 前必须退出 v1（全局热键 / 单实例 / 注册表右键三处冲突）。

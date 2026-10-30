@@ -10,6 +10,7 @@ using System.Threading;
 using PyTools.Core;
 using PyTools.Native;
 using PyTools.Tray;
+using PyTools.Views;
 using PyTools.Windows;
 
 namespace PyTools
@@ -25,6 +26,10 @@ namespace PyTools
         private SingleInstance _single;
         private TrayController _tray;
         private SummonWindowBase _window;
+        private SummonView _view;
+        private AppIndex _index;
+        private bool _bubbleNextScan; // 手动重扫后气泡反馈（首扫不气泡）
+        private string _debugQuery;   // --debug 配套 --query=<词>：呼出即预填搜索（UI 截图自验用）
         private IntPtr _hotkeyHwnd = IntPtr.Zero;
         private HwndSource _hotkeySource;
         private bool _capturedForeground; // 呼出前已记录前台
@@ -45,6 +50,13 @@ namespace PyTools
             base.OnStartup(e);
             var args = new System.Collections.Generic.List<string>(e.Args);
             var debug = args.Contains("--debug");
+            foreach (var arg in args)
+            {
+                if (arg.StartsWith("--query=", StringComparison.Ordinal))
+                {
+                    _debugQuery = arg.Substring("--query=".Length);
+                }
+            }
 
             if (args.Contains("--selftest"))
             {
@@ -65,21 +77,32 @@ namespace PyTools
             try
             {
                 _config = AppConfig.Load(Path.Combine(AppDirectory, "config.json"));
-                // v1 的 windowBounds 可能是窄条高度（640x70 时代的值），v2 含列表占位需要更高
-                if (_config.BoundsHeight < 300) _config.BoundsHeight = 420;
-                if (_config.BoundsWidth < 400) _config.BoundsWidth = 640;
                 ApplyTheme(_config.LiteMode);
                 _uiContext = SynchronizationContext.Current;
+
+                // 启动器索引（M2a）：后台扫描开始，完成后结果上线
+                _index = new AppIndex(AppDirectory, _config);
+                _index.AppsUpdated += OnAppsUpdated;
+                _index.ScanFinished += OnScanFinished;
+                _index.RescanAsync();
 
                 _tray = new TrayController();
                 _tray.Init();
                 _tray.OpenRequested += ToggleSummon;
+                _tray.RescanRequested += delegate
+                {
+                    _bubbleNextScan = true;
+                    _index.RescanAsync();
+                };
                 _tray.ExitRequested += ExitApplication;
 
                 _window = _config.LiteMode ? (SummonWindowBase)new SummonOpaqueWindow() : new SummonWindow();
-                _window.Width = _config.BoundsWidth;
-                _window.Height = _config.BoundsHeight;
+                _window.Width = _config.BoundsWidth; // 高度交给 SizeToContent（空态仅搜索框）
                 _window.EscapePressed += HideSummon;
+                _view = (SummonView)_window.Content;
+                _view.Index = _index;
+                _view.PageStep = _config.PageStep;
+                _view.LaunchRequested += OnLaunchRequested;
                 _window.Deactivated += (sender, eventArgs) =>
                 {
                     // M5 图钉在此挂钩：钉住时不响应失焦
@@ -105,6 +128,10 @@ namespace PyTools
                 {
                     // 调试模式：启动即显示且禁用失焦隐藏（与 v1 --debug 语义一致）
                     ShowSummon();
+                    if (_debugQuery != null)
+                    {
+                        _view.SearchBox.Text = _debugQuery; // 触发 RefreshResults（截图自验结果态）
+                    }
                 }
             }
             catch (Exception ex)
@@ -189,6 +216,7 @@ namespace PyTools
             Logger.Debug("captured foreground=0x" + _capturedTarget.ToString("X"));
 
             _hiding = false;
+            _view.ResetForSummon(); // 空态：只有搜索框（v1 同款），随后 EnsureOnScreen 的定位基于收缩后的实际尺寸
             // 先置零透明度再显示：Show() 若以满透明度渲染首帧，随后的淡入会造成视觉闪跳
             _window.Opacity = 0;
             EnsureOnScreen();
@@ -262,9 +290,42 @@ namespace PyTools
             if (double.IsNaN(left) || left < virtualLeft - 8 || left > virtualRight - 80)
                 left = (SystemParameters.WorkArea.Width - _window.Width) / 2 + virtualLeft;
             if (double.IsNaN(top) || top < virtualTop - 8 || top > virtualBottom - 80)
-                top = (SystemParameters.WorkArea.Height - _window.Height) / 3 + virtualTop;
+                top = SystemParameters.WorkArea.Height / 3 + virtualTop; // 高度动态化后默认位只按上三分之一锚定
             _window.Left = left;
             _window.Top = top;
+        }
+
+        // ---- 启动器（M2a）----
+
+        private void OnAppsUpdated()
+        {
+            // 重扫完成后，呼出中的列表按当前查询刷新
+            if (_view != null) _view.OnAppsReplaced();
+        }
+
+        private void OnScanFinished()
+        {
+            var count = _index.Apps.Count;
+            Logger.Info("scan finished, apps=" + count);
+            if (_bubbleNextScan)
+            {
+                _bubbleNextScan = false;
+                _tray.ShowBubble("PyTools", "重新扫描完成：" + count + " 个应用");
+            }
+        }
+
+        private void OnLaunchRequested(AppEntry entry)
+        {
+            var result = AppLauncher.Open(entry, _index.Roots, _index.Custom);
+            if (result == null)
+            {
+                // 启动成功：收起并恢复焦点
+                HideSummon();
+                return;
+            }
+            if (result.RemovedDeadEntry) _index.RescanAsync(); // 死条目已移除，列表刷新
+            if (!string.IsNullOrEmpty(result.Message)) _view.ShowToast(result.Message);
+            // 失败或移除场景都保持窗口展开：用户停留在已清理/已提示的列表上
         }
 
         private static double GetTokenDouble(string key)
