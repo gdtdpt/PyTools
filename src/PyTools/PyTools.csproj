@@ -69,6 +69,10 @@
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>
+    <Page Include="Windows\SettingsWindow.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
   </ItemGroup>
   <ItemGroup>
     <Compile Include="App.xaml.cs">
@@ -88,6 +92,8 @@
     <Compile Include="Core\CustomApps.cs" />
     <Compile Include="Core\IconCache.cs" />
     <Compile Include="Core\Pinyin.cs" />
+    <Compile Include="Core\ContextMenuRegistry.cs" />
+    <Compile Include="Core\Startup.cs" />
     <Compile Include="Native\NativeMethods.cs" />
     <Compile Include="Native\HotkeyParser.cs" />
     <Compile Include="Native\Foreground.cs" />
@@ -100,6 +106,10 @@
     </Compile>
     <Compile Include="Windows\SummonOpaqueWindow.xaml.cs">
       <DependentUpon>SummonOpaqueWindow.xaml</DependentUpon>
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="Windows\SettingsWindow.xaml.cs">
+      <DependentUpon>SettingsWindow.xaml</DependentUpon>
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="Views\SummonView.xaml.cs">

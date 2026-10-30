@@ -93,6 +93,13 @@ namespace PyTools.Core
             catch (Exception ex) { Logger.Error("save liteMode failed: " + ex.Message); }
         }
 
+        /// <summary>把当前全部字段写回（设置窗口各项统一走这里，M2b）。</summary>
+        public void Save()
+        {
+            try { WriteBack(); }
+            catch (Exception ex) { Logger.Error("save config failed: " + ex.Message); }
+        }
+
         private void WriteBack()
         {
             // 已知键同步回 raw（v1 键名），未知键原样保留

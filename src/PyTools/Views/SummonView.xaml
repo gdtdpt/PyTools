@@ -33,14 +33,27 @@
                              Background="Transparent"
                              BorderThickness="0"
                              VerticalContentAlignment="Center"/>
-                    <!-- 占位提示：输入非空即隐藏 -->
-                    <TextBlock Text="搜索应用…"
+                    <!-- 占位提示：输入非空即隐藏；操作模式下文案由 code-behind 切换 -->
+                    <TextBlock x:Name="PART_Placeholder"
+                               Text="搜索应用…"
                                Margin="2,0,0,0"
                                VerticalAlignment="Center"
                                IsHitTestVisible="False"
                                Foreground="{DynamicResource Text.Placeholder}"
                                FontSize="{DynamicResource Font.Base}"
                                Visibility="{Binding Text, ElementName=PART_SearchBox, Converter={StaticResource EmptyToVisible}}"/>
+                    <!-- 模式徽标：操作模式下显示于搜索框右缘 -->
+                    <Border x:Name="ModeBadge"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Center"
+                            Background="{DynamicResource Bg.ItemSelected}"
+                            CornerRadius="{DynamicResource Radius.Control}"
+                            Padding="8,2"
+                            Visibility="Collapsed">
+                        <TextBlock Text="操作"
+                                   Foreground="{DynamicResource Text.Primary}"
+                                   FontSize="{DynamicResource Font.Secondary}"/>
+                    </Border>
                 </Grid>
             </Border>
 

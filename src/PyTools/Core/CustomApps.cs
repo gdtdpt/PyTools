@@ -135,7 +135,12 @@ namespace PyTools.Core
                 FileInfo stat;
                 try { stat = new FileInfo(current); }
                 catch { result.Reason = FailNotFound; return result; }
-                if (!stat.Exists) { result.Reason = FailNotFound; return result; }
+                if (!stat.Exists)
+                {
+                    // 目录与不存在区分（v1 not-file / not-found 语义）
+                    result.Reason = Directory.Exists(current) ? FailNotFile : FailNotFound;
+                    return result;
+                }
 
                 var extension = (stat.Extension ?? "").ToLowerInvariant();
                 if (extension == ".lnk")

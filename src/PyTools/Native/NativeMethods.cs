@@ -41,6 +41,9 @@ namespace PyTools.Native
         [DllImport("kernel32.dll", SetLastError = true)]
         public static extern bool AttachConsole(uint dwProcessId);
 
+        [DllImport("dwmapi.dll")]
+        public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
+
         public const uint AttachParentProcess = 0xFFFFFFFF;
 
         public static void TryAttachConsole()

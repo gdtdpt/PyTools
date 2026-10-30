@@ -201,6 +201,48 @@ namespace PyTools.Core
                 finally { try { Directory.Delete(root, true); } catch { } }
             }));
 
+            results.Add(Test("登记：目录目标返回 not-file（v1 语义）", () =>
+            {
+                var path = Path.Combine(Path.GetTempPath(), "pytools-selftest-dir-" + Guid.NewGuid().ToString("N") + ".json");
+                try
+                {
+                    var custom = new CustomApps(path);
+                    var result = custom.Add(Path.GetTempPath()); // 目录
+                    return !result.Ok && result.Reason == "not-file" ? null : "reason=" + result.Reason;
+                }
+                finally { try { File.Delete(path); } catch { } }
+            }));
+
+            results.Add(Test("右键菜单：期望命令串与实况查询（只读）", () =>
+            {
+                var command = ContextMenuRegistry.ExpectedCommand();
+                if (!command.StartsWith("\"") || !command.EndsWith("\" \"--add-app=%1\""))
+                    return "command 格式异常: " + command;
+                // Configured() 只读查询 HKCU，不写注册表；当前值不作为断言（随用户开关变化）
+                ContextMenuRegistry.Configured();
+                return null;
+            }));
+
+            results.Add(Test("自启：Run 项命令串格式（只读）", () =>
+            {
+                var value = Startup.CommandValue();
+                return value.StartsWith("\"") && value.EndsWith("\"") && value.Length > 4 ? null : "value=" + value;
+            }));
+
+            results.Add(Test("单实例：add-app payload 文件写入与清理", () =>
+            {
+                var file = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, SingleInstance.AddAppFileName);
+                try
+                {
+                    var payload = Path.Combine(Path.GetTempPath(), "probe.exe");
+                    SingleInstance.SignalAddApp(payload); // 无首实例时信号 Set 失败，但文件应已写出
+                    if (!File.Exists(file)) return "payload 文件未写出";
+                    var text = File.ReadAllText(file);
+                    return text == payload ? null : "payload 内容不符: " + text;
+                }
+                finally { try { File.Delete(file); } catch { } }
+            }));
+
             var failed = 0;
             var lines = new List<string>();
             foreach (var r in results)

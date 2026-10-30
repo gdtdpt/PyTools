@@ -30,6 +30,7 @@ namespace PyTools
         private AppIndex _index;
         private bool _bubbleNextScan; // 手动重扫后气泡反馈（首扫不气泡）
         private string _debugQuery;   // --debug 配套 --query=<词>：呼出即预填搜索（UI 截图自验用）
+        private string _bootAddApp;   // 冷启动 --add-app=<路径>：静默驻留，不呼出窗口
         private IntPtr _hotkeyHwnd = IntPtr.Zero;
         private HwndSource _hotkeySource;
         private bool _capturedForeground; // 呼出前已记录前台
@@ -57,6 +58,7 @@ namespace PyTools
                     _debugQuery = arg.Substring("--query=".Length);
                 }
             }
+            _bootAddApp = ExtractAddAppArg(args); // 空串 = 带参数但值无效；null = 未带参数
 
             if (args.Contains("--selftest"))
             {
@@ -67,7 +69,8 @@ namespace PyTools
             if (!_single.TryAcquire())
             {
                 Logger.Info("second instance -> signal existing");
-                SingleInstance.SignalExisting();
+                if (_bootAddApp != null) SingleInstance.SignalAddApp(_bootAddApp);
+                else SingleInstance.SignalExisting();
                 Shutdown();
                 return;
             }
@@ -95,6 +98,7 @@ namespace PyTools
                     _index.RescanAsync();
                 };
                 _tray.ExitRequested += ExitApplication;
+                _tray.SettingsRequested += OpenSettings;
 
                 _window = _config.LiteMode ? (SummonWindowBase)new SummonOpaqueWindow() : new SummonWindow();
                 _window.Width = _config.BoundsWidth; // 高度交给 SizeToContent（空态仅搜索框）
@@ -103,10 +107,17 @@ namespace PyTools
                 _view.Index = _index;
                 _view.PageStep = _config.PageStep;
                 _view.LaunchRequested += OnLaunchRequested;
+                _view.ActionRequested += OnActionRequested;
                 _window.Deactivated += (sender, eventArgs) =>
                 {
                     // M5 图钉在此挂钩：钉住时不响应失焦
                     if (!debug) HideSummon();
+                };
+                _window.EscapePressed += delegate
+                {
+                    // 操作模式下 Esc 先退回结果列表（v1 语义），再藏窗
+                    if (_view.TryExitActionMode()) return;
+                    HideSummon();
                 };
 
                 if (!RegisterHotkey(HotkeyIdMain, _config.Hotkey))
@@ -121,6 +132,14 @@ namespace PyTools
                 }
 
                 _single.ListenShow(_uiContext, ToggleSummon);
+                _single.ListenAddApp(_uiContext, HandleAddAppRequest);
+
+                // 右键菜单自愈：开关开启但注册表与期望不符（挪目录/旧格式）时幂等重写（v1 repair 语义）
+                if (_config.AddAppContextMenu)
+                {
+                    var repairError = ContextMenuRegistry.Repair();
+                    if (repairError != null) Logger.Error("context-menu repair failed: " + repairError);
+                }
 
                 Logger.Info("started, liteMode=" + _config.LiteMode + ", debug=" + debug);
 
@@ -132,6 +151,15 @@ namespace PyTools
                     {
                         _view.SearchBox.Text = _debugQuery; // 触发 RefreshResults（截图自验结果态）
                     }
+                }
+                else if (_bootAddApp != null)
+                {
+                    // 右键「添加到 PyTools」冷启动：静默登记，不呼出窗口（v1 语义）
+                    HandleAddAppRequest(_bootAddApp);
+                }
+                else if (args.Contains("--settings"))
+                {
+                    OpenSettings(); // 调试/自验开关：启动即开设置窗口
                 }
             }
             catch (Exception ex)
@@ -328,6 +356,170 @@ namespace PyTools
             // 失败或移除场景都保持窗口展开：用户停留在已清理/已提示的列表上
         }
 
+        // ---- Tab 操作菜单（M2b，L5）----
+
+        private void OnActionRequested(AppEntry entry, string actionId)
+        {
+            switch (actionId)
+            {
+                case "open":
+                    OnLaunchRequested(entry); // 统一入口：含死条目检查与失败提示
+                    return;
+                case "show-folder":
+                {
+                    var error = OpenInExplorer(TargetFileOf(entry));
+                    FinishAction(error);
+                    return;
+                }
+                case "copy-name":
+                    FinishAction(CopyText(entry.Name));
+                    return;
+                case "copy-path":
+                    FinishAction(CopyText(TargetFileOf(entry)));
+                    return;
+                case "copy-dir":
+                    FinishAction(CopyText(TargetDirOf(entry)));
+                    return;
+                case "cmd":
+                    FinishAction(OpenTerminal("cmd", TargetDirOf(entry)));
+                    return;
+                case "powershell":
+                    FinishAction(OpenTerminal("powershell", TargetDirOf(entry)));
+                    return;
+                case "remove-custom":
+                    // v1 无手动移除出口（仅目标被删自动移除），本项补体验缺口（2026-10-30 用户确认）
+                    if (_index.Custom.Remove(entry.Path))
+                    {
+                        _index.RescanAsync();
+                        _view.ExitActionMode();
+                        HideSummon();
+                        _tray.ShowBubble("PyTools", "已移除登记：" + entry.Name);
+                    }
+                    else
+                    {
+                        _view.ShowToast("移除登记失败：清单中没有该条目");
+                    }
+                    return;
+                default:
+                    _view.ShowToast("未知操作：" + actionId);
+                    return;
+            }
+        }
+
+        /// <summary>动作收口：成功收起呼出窗（v1 语义）；失败 toast 原因并退出操作模式回列表。</summary>
+        private void FinishAction(string error)
+        {
+            if (error == null)
+            {
+                HideSummon();
+                return;
+            }
+            _view.ExitActionMode();
+            _view.ShowToast(error);
+        }
+
+        private static string TargetFileOf(AppEntry entry)
+        {
+            return string.IsNullOrEmpty(entry.TargetPath) ? entry.Path : entry.TargetPath;
+        }
+
+        private static string TargetDirOf(AppEntry entry)
+        {
+            if (!string.IsNullOrEmpty(entry.TargetDir)) return entry.TargetDir;
+            try { return Path.GetDirectoryName(TargetFileOf(entry)) ?? ""; }
+            catch { return ""; }
+        }
+
+        private string OpenInExplorer(string path)
+        {
+            if (string.IsNullOrEmpty(path) || !File.Exists(path)) return "目标不存在：" + path;
+            try
+            {
+                Process.Start("explorer.exe", "/select,\"" + path + "\"");
+                return null;
+            }
+            catch (Exception ex) { return "打开目录失败：" + ex.Message; }
+        }
+
+        private static string CopyText(string text)
+        {
+            try { Clipboard.SetText(text ?? ""); return null; }
+            catch (Exception ex) { return "复制失败：" + ex.Message; }
+        }
+
+        private string OpenTerminal(string shell, string dir)
+        {
+            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return "目录不存在：" + dir;
+            try
+            {
+                if (shell == "cmd")
+                {
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = "cmd.exe",
+                        Arguments = "/k cd /d \"" + dir + "\"",
+                        UseShellExecute = true
+                    });
+                }
+                else
+                {
+                    var escaped = dir.Replace("'", "''");
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = "powershell.exe",
+                        Arguments = "-NoExit -Command \"Set-Location -LiteralPath '" + escaped + "'\"",
+                        UseShellExecute = true
+                    });
+                }
+                return null;
+            }
+            catch (Exception ex) { return "打开终端失败：" + ex.Message; }
+        }
+
+        // ---- 静默添加（M2b，L9）----
+
+        /// <summary>提取 --add-app= 自包含 token（空串 = 带参但值无效，null = 未带参）。</summary>
+        private static string ExtractAddAppArg(System.Collections.Generic.List<string> args)
+        {
+            foreach (var arg in args)
+            {
+                if (!arg.StartsWith("--add-app=", StringComparison.Ordinal)) continue;
+                return arg.Substring("--add-app=".Length).Trim('"', ' ');
+            }
+            return null;
+        }
+
+        private void HandleAddAppRequest(object raw)
+        {
+            var target = raw as string;
+            if (string.IsNullOrEmpty(target)) return;
+            Logger.Info("add-app request: " + target);
+            var result = _index.Custom.Add(target);
+            if (result.Ok)
+            {
+                _index.RescanAsync();
+                _tray.ShowBubble("PyTools", "已添加：" + result.Name);
+            }
+            else
+            {
+                _tray.ShowBubble("PyTools", AddAppFailureText(result.Reason));
+            }
+        }
+
+        private static string AddAppFailureText(string reason)
+        {
+            switch (reason)
+            {
+                case "invalid": return "路径无效，未添加";
+                case "not-found": return "文件不存在或快捷方式指向失效，未添加";
+                case "not-file": return "目标不是文件，未添加";
+                case "not-app": return "仅支持可执行应用（exe/lnk），未添加";
+                case "shortcut-broken": return "快捷方式已损坏，未添加";
+                case "duplicate": return "该应用已在应用列表中";
+                default: return "添加失败：" + reason;
+            }
+        }
+
         private static double GetTokenDouble(string key)
         {
             object value;
@@ -337,6 +529,36 @@ namespace PyTools
                 if (value is double) return (double)value;
             }
             return 0;
+        }
+
+        // ---- 设置窗口（M2b，L10）----
+
+        private SettingsWindow _settingsWindow;
+
+        private void OpenSettings()
+        {
+            if (_settingsWindow != null)
+            {
+                _settingsWindow.Activate();
+                return;
+            }
+            _settingsWindow = new SettingsWindow(_config, _index, ApplyHotkey);
+            _settingsWindow.Closed += (sender, eventArgs) => _settingsWindow = null;
+            _settingsWindow.Show();
+        }
+
+        /// <summary>热键重录（设置窗口调用）：null = 成功，否则错误文案。失败回滚原热键。</summary>
+        private string ApplyHotkey(string newHotkey)
+        {
+            NativeMethods.UnregisterHotKey(_hotkeyHwnd, HotkeyIdMain);
+            if (!RegisterHotkey(HotkeyIdMain, newHotkey))
+            {
+                RegisterHotkey(HotkeyIdMain, _config.Hotkey); // 回滚原热键
+                return "注册失败：" + newHotkey + "（可能已被占用），已保留原热键";
+            }
+            _config.Hotkey = newHotkey;
+            _config.Save();
+            return null;
         }
 
         // ---- 退出 ----
