@@ -176,9 +176,11 @@ namespace PyTools
             else ShowSummon();
         }
 
+        private bool _hiding; // 收起动画进行中，防重复触发
+
         private void ShowSummon()
         {
-            if (_window.IsVisible) return;
+            if (_window.IsVisible || _hiding) return;
             var sw = Stopwatch.StartNew();
 
             // 呼出前记录前台（进程内同步调用，零开销）——焦点恢复的依据
@@ -186,6 +188,9 @@ namespace PyTools
             _capturedForeground = true;
             Logger.Debug("captured foreground=0x" + _capturedTarget.ToString("X"));
 
+            _hiding = false;
+            // 先置零透明度再显示：Show() 若以满透明度渲染首帧，随后的淡入会造成视觉闪跳
+            _window.Opacity = 0;
             EnsureOnScreen();
             _window.Show();
             _window.Activate();
@@ -197,6 +202,10 @@ namespace PyTools
                 var anim = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(ms)) { EasingFunction = new QuadraticEase() };
                 _window.BeginAnimation(UIElement.OpacityProperty, anim);
             }
+            else
+            {
+                _window.Opacity = 1;
+            }
 
             sw.Stop();
             Logger.Info("summon show elapsed=" + sw.ElapsedMilliseconds + "ms");
@@ -204,19 +213,31 @@ namespace PyTools
 
         private void HideSummon()
         {
-            if (_window == null || !_window.IsVisible) return;
+            if (_window == null || _hiding || !_window.IsVisible) return;
             var sw = Stopwatch.StartNew();
+            _hiding = true;
+
+            // 位置记忆（沿用 v1 的 windowBounds 键）
+            _config.SaveBounds(_window.Left, _window.Top, _window.Width, _window.Height);
 
             var ms = GetTokenDouble("Motion.HideMs");
             if (ms > 0)
             {
+                // 淡出完成后才真正隐藏（BeginAnimation 不阻塞，直接 Hide 会让动画形同虚设）
                 var anim = new DoubleAnimation(0, TimeSpan.FromMilliseconds(ms)) { EasingFunction = new QuadraticEase() };
+                anim.Completed += (sender, e) => CompleteHide(sw);
                 _window.BeginAnimation(UIElement.OpacityProperty, anim);
+                return;
             }
-            _window.Hide();
+            CompleteHide(sw);
+        }
 
-            // 位置记忆（沿用 v1 的 windowBounds 键）
-            _config.SaveBounds(_window.Left, _window.Top, _window.Width, _window.Height);
+        private void CompleteHide(Stopwatch sw)
+        {
+            _window.BeginAnimation(UIElement.OpacityProperty, null);
+            _window.Opacity = 1;
+            _window.Hide();
+            _hiding = false;
 
             // 焦点恢复（验证 + 重试 + 全程打点）
             if (_capturedForeground)

@@ -7,6 +7,8 @@
                         Background="Transparent"
                         Title="PyTools.Summon"
                         ShowInTaskbar="False">
-    <!-- 默认形态壳：真圆角 + 半透明阴影（质感由 Theme.xaml 令牌提供） -->
-    <views:SummonView/>
+    <!-- 默认形态壳：真圆角 + 半透明阴影（质感由 Theme.xaml 令牌提供）。
+         Margin 是阴影呼吸区：DropShadowEffect 画在 Border 之外，不留边距会被窗口边界裁切，
+         圆角处出现尖刺伪影（实测踩过）。下边距最大（ShadowDepth 向下投影）。 -->
+    <views:SummonView Margin="32,36,32,40"/>
 </local:SummonWindowBase>
