@@ -1,0 +1,12 @@
+﻿<local:SummonWindowBase x:Class="PyTools.Windows.SummonWindow"
+                        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                        xmlns:local="clr-namespace:PyTools.Windows"
+                        xmlns:views="clr-namespace:PyTools.Views"
+                        AllowsTransparency="True"
+                        Background="Transparent"
+                        Title="PyTools.Summon"
+                        ShowInTaskbar="False">
+    <!-- 默认形态壳：真圆角 + 半透明阴影（质感由 Theme.xaml 令牌提供） -->
+    <views:SummonView/>
+</local:SummonWindowBase>

@@ -1,0 +1,20 @@
+﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!--
+      简洁模式覆盖令牌（v2.liteMode）。
+      约束：仅覆盖「窗口底视觉 / 阴影 / 动效」三类，其余令牌继承 Theme.xaml，保证风格统一。
+      说明：简洁模式下窗体为不透明方角（Win10 不透明窗无法真圆角，Region 锯齿方案不采用），
+            内部控件圆角保留（Radius.Control 不在此覆盖）。
+    -->
+
+    <!-- 窗口底视觉：不透明纯色 + 方角 + 1px 边框增强轮廓 -->
+    <SolidColorBrush x:Key="Bg.Window" Color="#F7F8FA"/>
+    <CornerRadius x:Key="Radius.Window">0</CornerRadius>
+
+    <!-- 阴影：无效果 -->
+    <DropShadowEffect x:Key="Fx.WindowShadow" BlurRadius="0" ShadowDepth="0" Opacity="0"/>
+
+    <!-- 动效：直切 -->
+    <system:Double xmlns:system="clr-namespace:System;assembly=mscorlib" x:Key="Motion.SummonMs">0</system:Double>
+    <system:Double xmlns:system="clr-namespace:System;assembly=mscorlib" x:Key="Motion.HideMs">0</system:Double>
+</ResourceDictionary>

@@ -1,0 +1,54 @@
+﻿<UserControl x:Class="PyTools.Views.SummonView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:core="clr-namespace:PyTools.Core">
+    <!-- 呼出窗共用内容：搜索框 + 列表占位（M1 空壳）。两种窗壳（透明/不透明）复用本视图。 -->
+    <UserControl.Resources>
+        <core:EmptyToVisibilityConverter x:Key="EmptyToVisible"/>
+    </UserControl.Resources>
+    <Border Background="{DynamicResource Bg.Window}"
+            BorderBrush="{DynamicResource Border.Window}"
+            BorderThickness="1"
+            CornerRadius="{DynamicResource Radius.Window}"
+            Effect="{DynamicResource Fx.WindowShadow}">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <Border Grid.Row="0"
+                    Background="{DynamicResource Bg.Input}"
+                    BorderBrush="{DynamicResource Border.Input}"
+                    BorderThickness="0,0,0,1"
+                    Padding="{DynamicResource Layout.SearchPadding}">
+                <Grid>
+                    <TextBox x:Name="PART_SearchBox"
+                             Height="{DynamicResource Layout.SearchBoxHeight}"
+                             FontSize="{DynamicResource Font.Base}"
+                             Foreground="{DynamicResource Text.Primary}"
+                             CaretBrush="{DynamicResource Text.Primary}"
+                             Background="Transparent"
+                             BorderThickness="0"
+                             VerticalContentAlignment="Center"/>
+                    <!-- 占位提示：输入非空即隐藏（M1 无结果列表，仅视觉引导） -->
+                    <TextBlock Text="搜索应用、工具…"
+                               Margin="2,0,0,0"
+                               VerticalAlignment="Center"
+                               IsHitTestVisible="False"
+                               Foreground="{DynamicResource Text.Placeholder}"
+                               FontSize="{DynamicResource Font.Base}"
+                               Visibility="{Binding Text, ElementName=PART_SearchBox, Converter={StaticResource EmptyToVisible}}"/>
+                </Grid>
+            </Border>
+
+            <Grid Grid.Row="1">
+                <TextBlock Text="应用与工具列表将随 M2 提供"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"
+                           Foreground="{DynamicResource Text.Secondary}"
+                           FontSize="{DynamicResource Font.Secondary}"/>
+            </Grid>
+        </Grid>
+    </Border>
+</UserControl>
