@@ -16,6 +16,10 @@ namespace PyTools.Core
         public string IconPath = "";
         public bool IsCustom;           // 用户显式登记（同一 target 覆盖扫描条目）
 
+        /// <summary>内置工具入口条目（非文件路径，回车切视图而不是启动程序）。</summary>
+        public bool IsCommand;
+        public string CommandId = "";
+
         /// <summary>搜索词：小写关键词（name/targetName/targetFolder）。</summary>
         public List<string> Keywords = new List<string>();
 

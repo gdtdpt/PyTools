@@ -65,6 +65,14 @@
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>
+    <Page Include="Views\ActionPanel.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="Views\VscProjectView.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
     <Page Include="Windows\SummonWindow.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
@@ -100,6 +108,10 @@
     <Compile Include="Core\Startup.cs" />
     <Compile Include="Core\ClipboardHistory.cs" />
     <Compile Include="Core\ClipboardWatcher.cs" />
+    <Compile Include="Core\ActionItem.cs" />
+    <Compile Include="Core\VscProjects.cs" />
+    <Compile Include="Core\TerminalLauncher.cs" />
+    <Compile Include="Core\BuiltinCommands.cs" />
     <Compile Include="Native\NativeMethods.cs" />
     <Compile Include="Native\HotkeyParser.cs" />
     <Compile Include="Native\Foreground.cs" />
@@ -120,6 +132,14 @@
     </Compile>
     <Compile Include="Views\SummonView.xaml.cs">
       <DependentUpon>SummonView.xaml</DependentUpon>
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="Views\ActionPanel.xaml.cs">
+      <DependentUpon>ActionPanel.xaml</DependentUpon>
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="Views\VscProjectView.xaml.cs">
+      <DependentUpon>VscProjectView.xaml</DependentUpon>
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="Views\ClipboardView.xaml.cs">

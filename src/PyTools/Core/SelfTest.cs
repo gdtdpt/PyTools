@@ -410,6 +410,60 @@ namespace PyTools.Core
                 finally { TryDeleteDir(dir); }
             }));
 
+            results.Add(Test("VSCode 项目：file URI 解析（盘符大写 / 百分号解码）", () =>
+            {
+                var a = VscProjects.UriToPath("file:///c%3A/Users/me/My%20Code");
+                if (a != @"C:\Users\me\My Code") return "解析结果=" + a;
+                if (VscProjects.UriToPath("https://example.com/x") != null) return "非 file URI 未拒绝";
+                return VscProjects.UriToPath("file:///d%3A/proj") == @"D:\proj" ? null : "D 盘解析失败";
+            }));
+
+            results.Add(Test("VSCode 项目：读取 workspaceStorage（mtime 降序 / 去重 / 多根工作区）", () =>
+            {
+                var root = Path.Combine(Path.GetTempPath(), "pytools-selftest-vsc-" + Guid.NewGuid().ToString("N"));
+                try
+                {
+                    var s1 = Path.Combine(root, "s1");
+                    var s2 = Path.Combine(root, "s2");
+                    var s3 = Path.Combine(root, "s3");
+                    foreach (var dir in new[] { s1, s2, s3 }) Directory.CreateDirectory(dir);
+                    File.WriteAllText(Path.Combine(s1, "workspace.json"), "{\"folder\":\"file:///c%3A/dev%2Falpha\"}");
+                    File.WriteAllText(Path.Combine(s2, "workspace.json"), "{\"folder\":\"file:///c%3A/dev%2Falpha\"}");
+                    File.WriteAllText(Path.Combine(s3, "workspace.json"), "{\"workspace\":\"file:///c%3A/dev%2Fbeta%2Fbeta.code-workspace\"}");
+                    // 同目录只留最近一次：mtime s1 > s3 > s2
+                    Directory.SetLastWriteTimeUtc(s1, new DateTime(2026, 1, 3, 0, 0, 0, DateTimeKind.Utc));
+                    Directory.SetLastWriteTimeUtc(s2, new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+                    Directory.SetLastWriteTimeUtc(s3, new DateTime(2026, 1, 2, 0, 0, 0, DateTimeKind.Utc));
+
+                    var list = VscProjects.LoadFrom(root);
+                    if (list.Count != 2) return "条目数=" + list.Count;
+                    if (list[0].Title != "alpha") return "排序错，首位=" + list[0].Title;
+                    if (list[1].WorkspaceFile.Length == 0) return "多根工作区未识别";
+                    if (list[1].Title != "beta") return "工作区标题=" + list[1].Title;
+                    return list[1].Path.EndsWith("beta", StringComparison.OrdinalIgnoreCase) ? null : "工作区目录=" + list[1].Path;
+                }
+                finally { TryDeleteDir(root); }
+            }));
+
+            results.Add(Test("Git Bash：检测结果自洽（未安装可为 null，不得误判 WSL）", () =>
+            {
+                var root = TerminalLauncher.DetectGitBash();
+                if (root == null) return null; // 未安装是合法结果
+                if (!TerminalLauncher.LooksLikeGitRoot(root)) return "命中但不像 Git 安装根：" + root;
+                if (root.IndexOf("System32", StringComparison.OrdinalIgnoreCase) >= 0) return "误判为 WSL bash：" + root;
+                return null;
+            }));
+
+            results.Add(Test("内置命令：vsc 别名精确/前缀命中，无关查询不误命中", () =>
+            {
+                var exact = BuiltinCommands.Match("vsc");
+                if (exact == null || !exact.IsCommand || exact.CommandId != "vsc") return "精确别名未命中";
+                if (exact.Name.Length == 0 || exact.TargetPath.Length == 0) return "标题/副标题为空";
+                var prefix = BuiltinCommands.Match("vs");
+                if (prefix == null || prefix.CommandId != "vsc") return "前缀匹配失败";
+                return BuiltinCommands.Match("zzz") == null ? null : "无关查询误命中";
+            }));
+
             var failed = 0;
             var lines = new List<string>();
             foreach (var r in results)
