@@ -8,13 +8,15 @@
         <core:EmptyToVisibilityConverter x:Key="EmptyToVisible"/>
         <core:NullToVisibilityConverter x:Key="NotNullToVisible"/>
     </UserControl.Resources>
-    <Border Background="{DynamicResource Bg.Window}"
+    <Border x:Name="RootBorder"
+            Background="{DynamicResource Bg.Window}"
             BorderBrush="{DynamicResource Border.Window}"
             BorderThickness="1"
             CornerRadius="{DynamicResource Radius.Window}"
             Effect="{DynamicResource Fx.WindowShadow}">
         <Grid x:Name="ContentGrid">
             <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
@@ -33,7 +35,7 @@
                              Background="Transparent"
                              BorderThickness="0"
                              VerticalContentAlignment="Center"/>
-                    <!-- 占位提示：输入非空即隐藏；操作模式下文案由 code-behind 切换 -->
+                    <!-- 占位提示：输入非空即隐藏（主搜索框只属于主查询，动作过滤在面板内独立输入框） -->
                     <TextBlock x:Name="PART_Placeholder"
                                Text="搜索应用…"
                                Margin="2,0,0,0"
@@ -42,18 +44,6 @@
                                Foreground="{DynamicResource Text.Placeholder}"
                                FontSize="{DynamicResource Font.Base}"
                                Visibility="{Binding Text, ElementName=PART_SearchBox, Converter={StaticResource EmptyToVisible}}"/>
-                    <!-- 模式徽标：操作模式下显示于搜索框右缘 -->
-                    <Border x:Name="ModeBadge"
-                            HorizontalAlignment="Right"
-                            VerticalAlignment="Center"
-                            Background="{DynamicResource Bg.ItemSelected}"
-                            CornerRadius="{DynamicResource Radius.Control}"
-                            Padding="8,2"
-                            Visibility="Collapsed">
-                        <TextBlock Text="操作"
-                                   Foreground="{DynamicResource Text.Primary}"
-                                   FontSize="{DynamicResource Font.Secondary}"/>
-                    </Border>
                 </Grid>
             </Border>
 
@@ -139,9 +129,181 @@
                            Visibility="Collapsed"/>
             </Grid>
 
+            <!-- 底部提示条（Raycast 式）：左「打开 ↵」右「操作 Ctrl+Enter」；
+                 「操作」段是鼠标呼出动作面板的触发点（点击 = Ctrl+Enter），
+                 选中条目无可用动作时整段隐藏；可见性由 code-behind 随列表联动 -->
+            <Border x:Name="HintBar"
+                    Grid.Row="2"
+                    Background="{DynamicResource Bg.Input}"
+                    BorderBrush="{DynamicResource Border.Input}"
+                    BorderThickness="0,1,0,0"
+                    Padding="12,5"
+                    Visibility="Collapsed">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" HorizontalAlignment="Left">
+                        <TextBlock Text="打开"
+                                   VerticalAlignment="Center"
+                                   Foreground="{DynamicResource Text.Secondary}"
+                                   FontSize="{DynamicResource Font.Secondary}"/>
+                        <Border VerticalAlignment="Center"
+                                Margin="6,0,0,0"
+                                Background="{DynamicResource Bg.ItemHover}"
+                                BorderBrush="{DynamicResource Border.Input}"
+                                BorderThickness="1"
+                                CornerRadius="3"
+                                Padding="5,0">
+                            <TextBlock Text="↵"
+                                       Foreground="{DynamicResource Text.Secondary}"
+                                       FontSize="{DynamicResource Font.Secondary}"/>
+                        </Border>
+                    </StackPanel>
+                    <StackPanel x:Name="ActionsHint"
+                                Grid.Column="1"
+                                Orientation="Horizontal"
+                                HorizontalAlignment="Right"
+                                Cursor="Hand"
+                                Background="Transparent">
+                        <TextBlock Text="操作"
+                                   VerticalAlignment="Center"
+                                   Foreground="{DynamicResource Text.Secondary}"
+                                   FontSize="{DynamicResource Font.Secondary}"/>
+                        <Border VerticalAlignment="Center"
+                                Margin="6,0,0,0"
+                                Background="{DynamicResource Bg.ItemHover}"
+                                BorderBrush="{DynamicResource Border.Input}"
+                                BorderThickness="1"
+                                CornerRadius="3"
+                                Padding="5,0">
+                            <TextBlock Text="Ctrl+Enter"
+                                       Foreground="{DynamicResource Text.Secondary}"
+                                       FontSize="{DynamicResource Font.Secondary}"/>
+                        </Border>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <!-- Ctrl+Enter 动作面板（Raycast 式 POC）：独立 Popup 浮层，可伸出窗外，
+                 高度与主列表无关——上限 5 行、超出走内部滚动条；
+                 空查询时可按行尾提示键直执行，有查询则字符落入搜索框过滤 -->
+            <Popup x:Name="ActionsPopup"
+                   AllowsTransparency="True"
+                   StaysOpen="True"
+                   Focusable="False"
+                   PopupAnimation="None"
+                   Placement="RelativePoint"
+                   PlacementTarget="{Binding ElementName=RootBorder}">
+                <Border x:Name="ActionsCard"
+                        Width="300"
+                        Background="{DynamicResource Bg.Input}"
+                        BorderBrush="{DynamicResource Border.Input}"
+                        BorderThickness="1"
+                        CornerRadius="{DynamicResource Radius.Control}"
+                        Effect="{DynamicResource Fx.WindowShadow}">
+                    <StackPanel>
+                        <ListBox x:Name="PART_Actions"
+                                 MaxHeight="146"
+                                 Background="Transparent"
+                                 BorderThickness="0"
+                                 Padding="3"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                 PreviewMouseLeftButtonUp="OnActionClick">
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem">
+                                <Setter Property="Padding" Value="0"/>
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="ListBoxItem">
+                                            <Border x:Name="Bd"
+                                                    Background="Transparent"
+                                                    CornerRadius="{DynamicResource Radius.Control}"
+                                                    Margin="1,0">
+                                                <ContentPresenter/>
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Bg.ItemHover}"/>
+                                                </Trigger>
+                                                <Trigger Property="IsSelected" Value="True">
+                                                    <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Bg.ItemSelected}"/>
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                        </ListBox.ItemContainerStyle>
+                        <!-- 紧凑单行：标题 + 行尾提示键（无描述行） -->
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="8,3" MinHeight="22">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0"
+                                               Text="{Binding Title}"
+                                               VerticalAlignment="Center"
+                                               FontSize="{DynamicResource Font.Base}"
+                                               Foreground="{DynamicResource Text.Primary}"
+                                               TextTrimming="CharacterEllipsis"/>
+                                    <Border Grid.Column="1"
+                                            VerticalAlignment="Center"
+                                            Background="{DynamicResource Bg.ItemHover}"
+                                            BorderBrush="{DynamicResource Border.Input}"
+                                            BorderThickness="1"
+                                            CornerRadius="3"
+                                            Padding="5,0"
+                                            Margin="8,0,0,0">
+                                        <TextBlock Text="{Binding Hint}"
+                                                   Foreground="{DynamicResource Text.Secondary}"
+                                                   FontSize="{DynamicResource Font.Secondary}"/>
+                                    </Border>
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                    <TextBlock x:Name="NoActionHint"
+                               Text="没有匹配的操作"
+                               Margin="14,10"
+                               Foreground="{DynamicResource Text.Secondary}"
+                               FontSize="{DynamicResource Font.Secondary}"
+                               Visibility="Collapsed"/>
+                    <!-- 独立动作过滤输入（Raycast 式）：主搜索框不被面板复用，焦点随面板进出 -->
+                    <Border Margin="6,2,6,6"
+                            Background="{DynamicResource Bg.ItemHover}"
+                            CornerRadius="{DynamicResource Radius.Control}">
+                        <Grid>
+                            <TextBlock Text="搜索操作…"
+                                       Margin="10,0,0,0"
+                                       VerticalAlignment="Center"
+                                       IsHitTestVisible="False"
+                                       Foreground="{DynamicResource Text.Placeholder}"
+                                       FontSize="{DynamicResource Font.Secondary}"
+                                       Visibility="{Binding Text, ElementName=PART_ActionFilter, Converter={StaticResource EmptyToVisible}}"/>
+                            <TextBox x:Name="PART_ActionFilter"
+                                     Height="26"
+                                     Background="Transparent"
+                                     BorderThickness="0"
+                                     Padding="8,3"
+                                     Margin="2,0"
+                                     VerticalContentAlignment="Center"
+                                     FontSize="{DynamicResource Font.Secondary}"
+                                     Foreground="{DynamicResource Text.Primary}"
+                                     CaretBrush="{DynamicResource Text.Primary}"/>
+                        </Grid>
+                    </Border>
+                </StackPanel>
+                </Border>
+            </Popup>
+
             <!-- toast：底部浮层（启动失败 / 死条目移除等提示），RowSpan 盖住整窗下缘 -->
             <Border x:Name="Toast"
-                    Grid.Row="0" Grid.RowSpan="2"
+                    Grid.Row="0" Grid.RowSpan="3"
                     VerticalAlignment="Bottom"
                     HorizontalAlignment="Center"
                     Margin="0,0,0,12"

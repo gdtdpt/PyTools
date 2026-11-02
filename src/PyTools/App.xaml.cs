@@ -109,7 +109,6 @@ namespace PyTools
 
                 _window = _config.LiteMode ? (SummonWindowBase)new SummonOpaqueWindow() : new SummonWindow();
                 _window.Width = _config.BoundsWidth; // 高度交给 SizeToContent（空态仅搜索框）
-                _window.EscapePressed += HideSummon;
                 _view = (SummonView)_window.Content;
                 _view.Index = _index;
                 _view.PageStep = _config.PageStep;
@@ -134,7 +133,8 @@ namespace PyTools
                 };
                 _window.EscapePressed += delegate
                 {
-                    // 操作模式下 Esc 先退回结果列表（v1 语义），再藏窗
+                    // Esc 分层退出：动作面板 → 结果列表 → 藏窗（唯一处理器；此前 M1 的直连
+                    // HideSummon 未摘除，先于本处理器执行导致动作面板开着 Esc 直接藏窗）
                     if (_view.TryExitActionMode()) return;
                     HideSummon();
                 };
@@ -355,6 +355,9 @@ namespace PyTools
             if (_window == null || _hiding || !_window.IsVisible) return;
             var sw = Stopwatch.StartNew();
             _hiding = true;
+
+            // 动作面板是独立 Popup HWND，不随主窗隐藏而消失，必须显式关（否则藏窗后面板残留屏幕）
+            _view.ExitActionMode();
 
             // 位置记忆（沿用 v1 的 windowBounds 键）
             _config.SaveBounds(_window.Left, _window.Top, _window.Width, _window.Height);

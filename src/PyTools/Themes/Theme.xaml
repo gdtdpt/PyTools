@@ -12,6 +12,7 @@
     <SolidColorBrush x:Key="Bg.ItemSelected" Color="#E3EAFB"/>
     <SolidColorBrush x:Key="Border.Window" Color="#E2E5EA"/>
     <SolidColorBrush x:Key="Border.Input" Color="#E2E5EA"/>
+    <SolidColorBrush x:Key="Border.Scrollbar" Color="#D6DAE1"/>
     <SolidColorBrush x:Key="Text.Primary" Color="#1F2328"/>
     <SolidColorBrush x:Key="Text.Secondary" Color="#6E7681"/>
     <SolidColorBrush x:Key="Text.Placeholder" Color="#9EA0A4"/>
@@ -40,4 +41,87 @@
     <system:Double xmlns:system="clr-namespace:System;assembly=mscorlib" x:Key="Layout.ListMaxHeight">480</system:Double>
     <Thickness x:Key="Layout.SearchPadding">14,0,14,0</Thickness>
     <Thickness x:Key="Layout.ItemMargin">8,2,8,2</Thickness>
+
+    <!-- 滚动条：紧凑细轨（拇指可视 4px 两侧内收、无箭头），隐式样式全应用统一（主列表 / 动作面板 / 设置窗口列表） -->
+    <Style TargetType="{x:Type ScrollBar}">
+        <!-- MinWidth/MinHeight 必须显式压掉主题默认样式的 17（theme 层 setter 高于我们的 Width，不压则实际宽度恒 17） -->
+        <Setter Property="MinWidth" Value="4"/>
+        <Setter Property="MinHeight" Value="4"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Width" Value="4"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type ScrollBar}">
+                    <Grid Background="Transparent">
+                        <Track x:Name="PART_Track" IsDirectionReversed="True">
+                            <Track.DecreaseRepeatButton>
+                                <RepeatButton Command="ScrollBar.PageUpCommand" Opacity="0" Focusable="False"/>
+                            </Track.DecreaseRepeatButton>
+                            <Track.IncreaseRepeatButton>
+                                <RepeatButton Command="ScrollBar.PageDownCommand" Opacity="0" Focusable="False"/>
+                            </Track.IncreaseRepeatButton>
+                            <Track.Thumb>
+                                <Thumb>
+                                    <Thumb.Template>
+                                        <ControlTemplate TargetType="{x:Type Thumb}">
+                                            <Border x:Name="ThumbBd"
+                                                    Background="{DynamicResource Border.Scrollbar}"
+                                                    Width="4"
+                                                    HorizontalAlignment="Center"
+                                                    CornerRadius="2"/>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="ThumbBd" Property="Background" Value="{DynamicResource Text.Placeholder}"/>
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Thumb.Template>
+                                </Thumb>
+                            </Track.Thumb>
+                        </Track>
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+        <Style.Triggers>
+            <Trigger Property="Orientation" Value="Horizontal">
+                <Setter Property="Width" Value="Auto"/>
+                <Setter Property="Height" Value="4"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type ScrollBar}">
+                            <Grid Background="Transparent">
+                                <Track x:Name="PART_Track">
+                                    <Track.DecreaseRepeatButton>
+                                        <RepeatButton Command="ScrollBar.PageLeftCommand" Opacity="0" Focusable="False"/>
+                                    </Track.DecreaseRepeatButton>
+                                    <Track.IncreaseRepeatButton>
+                                        <RepeatButton Command="ScrollBar.PageRightCommand" Opacity="0" Focusable="False"/>
+                                    </Track.IncreaseRepeatButton>
+                                    <Track.Thumb>
+                                        <Thumb>
+                                            <Thumb.Template>
+                                                <ControlTemplate TargetType="{x:Type Thumb}">
+                                                    <Border x:Name="ThumbBd"
+                                                            Background="{DynamicResource Border.Scrollbar}"
+                                                            Height="4"
+                                                            VerticalAlignment="Center"
+                                                            CornerRadius="2"/>
+                                                    <ControlTemplate.Triggers>
+                                                        <Trigger Property="IsMouseOver" Value="True">
+                                                            <Setter TargetName="ThumbBd" Property="Background" Value="{DynamicResource Text.Placeholder}"/>
+                                                        </Trigger>
+                                                    </ControlTemplate.Triggers>
+                                                </ControlTemplate>
+                                            </Thumb.Template>
+                                        </Thumb>
+                                    </Track.Thumb>
+                                </Track>
+                            </Grid>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
 </ResourceDictionary>

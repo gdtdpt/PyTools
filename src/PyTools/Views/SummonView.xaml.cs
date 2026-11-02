@@ -55,7 +55,7 @@ namespace PyTools.Views
         private readonly DispatcherTimer _toastTimer;
         private int _generation; // 结果集换代号：图标异步回调过期即弃
         private ScrollViewer _scroll;
-        private bool _actionMode;      // Tab 操作模式：列表内容 = 当前条目的动作集
+        private bool _actionMode;      // Ctrl+Enter 动作面板：独立浮层 + 自带过滤输入框
         private AppEntry _actionTarget; // 操作模式的目标条目
 
         public SummonView()
@@ -65,8 +65,11 @@ namespace PyTools.Views
             _toastTimer.Tick += delegate { Toast.Visibility = Visibility.Collapsed; _toastTimer.Stop(); };
             PART_List.AddHandler(ScrollViewer.ScrollChangedEvent, new ScrollChangedEventHandler(OnListScrollChanged));
             PART_List.PreviewMouseLeftButtonUp += OnListClick;
-            SearchBox.TextChanged += delegate { if (_actionMode) RefreshActions(); else RefreshResults(); };
+            SearchBox.TextChanged += delegate { RefreshResults(); };
+            PART_ActionFilter.TextChanged += delegate { if (_actionMode) RefreshActions(); };
             PreviewKeyDown += OnViewPreviewKeyDown;
+            PreviewMouseLeftButtonUp += OnViewPreviewMouseUp; // 底部「操作」键帽的鼠标呼出（根级 hit test）
+            ActionsCard.SizeChanged += delegate { UpdatePopupOffsets(); }; // 过滤增减行时保持底边锚定
             Loaded += delegate { _scroll = ListBadgeHelper.FindScroll(PART_List); };
         }
 
@@ -99,7 +102,7 @@ namespace PyTools.Views
             SetListVisible(false);
         }
 
-        /// <summary>Esc / Tab 由 App 转问：操作模式先退回结果列表而非藏窗。返回是否已消费。</summary>
+        /// <summary>Esc / Tab 由 App 转问：操作模式先退回结果列表而非藏窗（Tab 为过渡期兼容）。返回是否已消费。</summary>
         public bool TryExitActionMode()
         {
             if (!_actionMode) return false;
@@ -120,8 +123,10 @@ namespace PyTools.Views
             if (!_actionMode) return;
             _actionMode = false;
             _actionTarget = null;
-            ModeBadge.Visibility = Visibility.Collapsed;
-            PART_Placeholder.Text = "搜索应用…";
+            ActionsPopup.IsOpen = false;
+            PART_ActionFilter.Text = "";
+            SearchBox.Focus(); // 焦点回主搜索框（面板有自己的输入框，主框全程未被复用）
+            UpdateHintBar(); // 恢复提示条（公开退出路径随后还会 RefreshResults 再联动一次）
         }
 
         public void ShowToast(string message)
@@ -195,6 +200,7 @@ namespace PyTools.Views
         private void SetListVisible(bool visible)
         {
             ListArea.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+            UpdateHintBar(); // 提示条随列表显隐联动（空态整条隐藏）
             if (!visible)
             {
                 PART_List.ItemsSource = null;
@@ -204,67 +210,113 @@ namespace PyTools.Views
             }
         }
 
-        // ---- 操作模式（Tab，L5）----
+        /// <summary>底部提示条联动：列表可见时显示；「操作」段仅当前选中条目有可用动作时显示
+        /// （M4 工具可声明零动作 → 只显示「打开 ↵」）；动作面板打开期间整条隐藏避免重叠。</summary>
+        private void UpdateHintBar()
+        {
+            var listVisible = !_actionMode && ListArea.Visibility == Visibility.Visible;
+            HintBar.Visibility = listVisible ? Visibility.Visible : Visibility.Collapsed;
+            if (!listVisible) return;
+            var hasActions = false;
+            var sel = SelectedIndex();
+            if (sel >= 0 && sel < _items.Count) hasActions = AvailableActionCount(_items[sel].Entry) > 0;
+            ActionsHint.Visibility = hasActions ? Visibility.Visible : Visibility.Collapsed;
+        }
 
-        private readonly List<string> _actionIds = new List<string>();
+        /// <summary>目标条目可用的动作数（无过滤查询）。动作面板与底部提示条共用同一判定，
+        /// M4 工具接入时在此处按条目类型裁剪即可，两处自动一致。</summary>
+        private static int AvailableActionCount(AppEntry target)
+        {
+            var n = 0;
+            foreach (var def in ActionDefs)
+                if (def[2] != "custom" || (target != null && target.IsCustom)) n++;
+            return n;
+        }
+
+        /// <summary>鼠标点底部「操作 Ctrl+Enter」键帽 = 键盘 Ctrl+Enter，呼出动作面板。
+        /// 统一在根级隧道事件里做 hit test：直连子元素事件在焦点/捕获场景可能收不到 MouseUp。</summary>
+        private void OnViewPreviewMouseUp(object sender, MouseButtonEventArgs e)
+        {
+            if (!ActionsHint.IsVisible) return;
+            var src = e.OriginalSource as DependencyObject;
+            while (src != null && !ReferenceEquals(src, ActionsHint)) src = VisualTreeHelper.GetParent(src);
+            if (ReferenceEquals(src, ActionsHint)) OnActionsHintClick(sender, e);
+        }
+
+        private void OnActionsHintClick(object sender, MouseButtonEventArgs e)
+        {
+            if (_actionMode || _items.Count == 0) return;
+            EnterActionMode(_items[SelectedIndex()].Entry);
+        }
+
+        // ---- 操作模式（Ctrl+Enter 动作面板，Raycast 式 POC）----
+
+        private sealed class ActionVM
+        {
+            public string Title { get; set; }
+            public string Hint { get; set; } // 行尾单键提示：空查询时按下即执行
+        }
+
+        // 与 ActionDefs 顺序一一对应，各字母互不重复
+        private static readonly string[] ActionHints = { "O", "F", "N", "P", "D", "T", "S", "R" };
+
+        private readonly List<ActionVM> _actionRows = new List<ActionVM>();
+        private readonly List<string> _actionIds = new List<string>(); // 与 _actionRows 平行：过滤后的动作 id
+        private int _actionSel;
 
         private void EnterActionMode(AppEntry target)
         {
             _actionMode = true;
             _actionTarget = target;
-            ModeBadge.Visibility = Visibility.Visible;
-            PART_Placeholder.Text = "过滤操作…（Tab/Esc 返回）";
-            SearchBox.Text = "";
+            UpdateHintBar(); // 面板浮于提示条上方，打开期间整条隐藏
+            PART_ActionFilter.Text = "";
             RefreshActions();
+            ActionsPopup.IsOpen = true;
+            UpdatePopupOffsets();
+            PART_ActionFilter.Focus(); // 焦点移入面板过滤框（Raycast 式），主搜索框原样保留
+        }
+
+        /// <summary>动作面板右下角贴窗（留 12px 边距）。面板是独立 Popup、可伸出窗外，
+        /// 高度与主列表无关；卡片尺寸变化（过滤增减行）时重算，保持底边锚定。</summary>
+        private void UpdatePopupOffsets()
+        {
+            if (!_actionMode) return;
+            ActionsPopup.HorizontalOffset = Math.Max(0, RootBorder.ActualWidth - 12 - ActionsCard.ActualWidth);
+            ActionsPopup.VerticalOffset = Math.Max(0, RootBorder.ActualHeight - 12 - ActionsCard.ActualHeight);
         }
 
         private void RefreshActions()
         {
-            var query = (SearchBox.Text ?? "").Trim();
-            _generation++;
-            _items.Clear();
+            var query = (PART_ActionFilter.Text ?? "").Trim();
+            _actionRows.Clear();
             _actionIds.Clear();
-            foreach (var def in ActionDefs)
+            for (var i = 0; i < ActionDefs.Length; i++)
             {
+                var def = ActionDefs[i];
                 var id = def[0];
                 var title = def[1];
                 if (def[2] == "custom" && (_actionTarget == null || !_actionTarget.IsCustom)) continue;
-                if (query.Length > 0 && title.IndexOf(query, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                // 标题与 id 双匹配：标题是中文（复制应用名），输英文 "copy" 也能靠 id（copy-name）命中
+                if (query.Length > 0
+                    && title.IndexOf(query, StringComparison.OrdinalIgnoreCase) < 0
+                    && id.IndexOf(query, StringComparison.OrdinalIgnoreCase) < 0) continue;
 
-                // 动作条目复用 ItemVM 渲染管线（角标/键位/滚动全复用）：Name=标题、PathText=描述（v1 对齐）
-                var targetFile = !string.IsNullOrEmpty(_actionTarget.TargetPath) ? _actionTarget.TargetPath : _actionTarget.Path;
-                string description;
-                switch (id)
-                {
-                    case "open":
-                    case "copy-name":
-                        description = _actionTarget.Name;
-                        break;
-                    case "copy-dir":
-                    case "cmd":
-                    case "powershell":
-                        description = !string.IsNullOrEmpty(_actionTarget.TargetDir)
-                            ? _actionTarget.TargetDir
-                            : Path.GetDirectoryName(targetFile);
-                        break;
-                    case "remove-custom":
-                        description = "从应用列表删除此登记";
-                        break;
-                    default: // show-folder / copy-path
-                        description = targetFile;
-                        break;
-                }
-                _items.Add(new ItemVM { Entry = new AppEntry { Name = title, TargetPath = description, Path = description } });
+                _actionRows.Add(new ActionVM { Title = title, Hint = ActionHints[i] });
                 _actionIds.Add(id);
             }
-            PART_List.ItemsSource = null;
-            PART_List.ItemsSource = _items;
-            SetSelected(_items.Count > 0 ? 0 : -1, scrollIntoView: false);
-            UpdateBadges(0);
+            PART_Actions.ItemsSource = null;
+            PART_Actions.ItemsSource = _actionRows;
+            SetActionSelected(0);
 
-            EmptyHint.Text = _actionTarget == null ? "没有可用操作" : "没有匹配的操作";
-            EmptyHint.Visibility = _items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-            SetListVisible(true);
+            NoActionHint.Visibility = _actionRows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        private void SetActionSelected(int index)
+        {
+            if (_actionRows.Count == 0) { _actionSel = -1; return; }
+            _actionSel = Math.Max(0, Math.Min(index, _actionRows.Count - 1));
+            PART_Actions.SelectedIndex = _actionSel;
+            PART_Actions.ScrollIntoView(_actionRows[_actionSel]);
         }
 
         private void ExecuteActionAt(int index)
@@ -272,6 +324,16 @@ namespace PyTools.Views
             if (!_actionMode || index < 0 || index >= _actionIds.Count) return;
             var handler = ActionRequested;
             if (handler != null) handler(_actionTarget, _actionIds[index]);
+        }
+
+        private void OnActionClick(object sender, MouseButtonEventArgs e)
+        {
+            var item = e.OriginalSource as DependencyObject;
+            while (item != null && !(item is ListBoxItem)) item = VisualTreeHelper.GetParent(item);
+            var container = item as ListBoxItem;
+            if (container == null) return;
+            var index = PART_Actions.ItemContainerGenerator.IndexFromContainer(container);
+            if (index >= 0) { ExecuteActionAt(index); e.Handled = true; }
         }
 
         /// <summary>回车/数字/点击的统一执行入口：按模式分流。</summary>
@@ -291,38 +353,56 @@ namespace PyTools.Views
 
             if (e.Key == Key.Down || (isCtrl && e.Key == Key.J))
             {
-                if (listVisible && count > 0) { SetSelected(Math.Min(SelectedIndex() + 1, count - 1)); e.Handled = true; }
+                // 动作面板打开期间，所有移动键（含习惯键 Ctrl+J/K、步进键 Ctrl+N/P）都驱动面板
+                if (_actionMode) { SetActionSelected(_actionSel + 1); e.Handled = true; }
+                else if (listVisible && count > 0) { SetSelected(Math.Min(SelectedIndex() + 1, count - 1)); e.Handled = true; }
                 return;
             }
             if (e.Key == Key.Up || (isCtrl && e.Key == Key.K))
             {
-                if (listVisible && count > 0) { SetSelected(Math.Max(SelectedIndex() - 1, 0)); e.Handled = true; }
+                if (_actionMode) { SetActionSelected(_actionSel - 1); e.Handled = true; }
+                else if (listVisible && count > 0) { SetSelected(Math.Max(SelectedIndex() - 1, 0)); e.Handled = true; }
                 return;
             }
             if (isCtrl && e.Key == Key.N)
             {
-                if (listVisible && count > 0) { SetSelected(Math.Min(SelectedIndex() + Math.Max(1, PageStep), count - 1)); e.Handled = true; }
+                if (_actionMode) { SetActionSelected(_actionSel + Math.Max(1, PageStep)); e.Handled = true; }
+                else if (listVisible && count > 0) { SetSelected(Math.Min(SelectedIndex() + Math.Max(1, PageStep), count - 1)); e.Handled = true; }
                 return;
             }
             if (isCtrl && e.Key == Key.P)
             {
-                if (listVisible && count > 0) { SetSelected(Math.Max(SelectedIndex() - Math.Max(1, PageStep), 0)); e.Handled = true; }
+                if (_actionMode) { SetActionSelected(_actionSel - Math.Max(1, PageStep)); e.Handled = true; }
+                else if (listVisible && count > 0) { SetSelected(Math.Max(SelectedIndex() - Math.Max(1, PageStep), 0)); e.Handled = true; }
                 return;
             }
-            if (e.Key == Key.Tab)
+            if (isCtrl && e.Key == Key.Enter)
             {
-                if (_actionMode)
-                {
-                    ExitActionModeInternal();
-                    RefreshResults();
-                    e.Handled = true;
-                }
-                else if (listVisible && count > 0)
-                {
-                    EnterActionMode(_items[SelectedIndex()].Entry);
-                    e.Handled = true;
-                }
+                // Ctrl+Enter：动作面板全局开关（开 → 关；关 → 开，需有选中条目）
+                if (_actionMode) ExitActionMode();
+                else if (listVisible && count > 0) EnterActionMode(_items[SelectedIndex()].Entry);
+                e.Handled = true;
                 return;
+            }
+            if (_actionMode)
+            {
+                // 动作面板态：移动键已在上方统一接管；这里只管回车执行、Tab 退出、单键直执行
+                if (e.Key == Key.Enter) { ExecuteActionAt(_actionSel); e.Handled = true; return; }
+                if (e.Key == Key.Tab) { ExitActionMode(); e.Handled = true; return; }
+                if (!isCtrl && e.Key >= Key.A && e.Key <= Key.Z)
+                {
+                    // 过滤为空且字母命中行尾提示键 → 直执行（Raycast quick key）；
+                    // 未命中的字母放行给面板过滤框（否则想输 "copy" 的 c 会被吞掉）
+                    var letter = ((char)('A' + (e.Key - Key.A))).ToString();
+                    var idx = _actionRows.FindIndex(r => r.Hint == letter);
+                    if ((PART_ActionFilter.Text ?? "").Trim().Length == 0 && idx >= 0)
+                    {
+                        ExecuteActionAt(idx);
+                        e.Handled = true;
+                    }
+                    return;
+                }
+                return; // 其余按键（数字/字母/标点）交面板过滤框正常输入
             }
             if (e.Key == Key.Enter)
             {
@@ -354,6 +434,7 @@ namespace PyTools.Views
         private void SetSelected(int index, bool scrollIntoView = true)
         {
             PART_List.SelectedIndex = index;
+            UpdateHintBar(); // 选中条目变了，可用动作可能不同 → 「操作」提示段联动
             if (scrollIntoView && index >= 0 && index < _items.Count)
             {
                 PART_List.ScrollIntoView(_items[index]);
