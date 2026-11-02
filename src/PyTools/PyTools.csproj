@@ -73,6 +73,10 @@
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>
+    <Page Include="Views\FormatView.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
     <Page Include="Windows\SummonWindow.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
@@ -112,6 +116,7 @@
     <Compile Include="Core\VscProjects.cs" />
     <Compile Include="Core\TerminalLauncher.cs" />
     <Compile Include="Core\BuiltinCommands.cs" />
+    <Compile Include="Core\StructuredFormats.cs" />
     <Compile Include="Native\NativeMethods.cs" />
     <Compile Include="Native\HotkeyParser.cs" />
     <Compile Include="Native\Foreground.cs" />
@@ -140,6 +145,10 @@
     </Compile>
     <Compile Include="Views\VscProjectView.xaml.cs">
       <DependentUpon>VscProjectView.xaml</DependentUpon>
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="Views\FormatView.xaml.cs">
+      <DependentUpon>FormatView.xaml</DependentUpon>
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="Views\ClipboardView.xaml.cs">

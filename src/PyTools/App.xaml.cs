@@ -29,7 +29,9 @@ namespace PyTools
         private SummonWindowBase _window;
         private SummonView _view;
         private ClipboardView _clipView;
+        private bool _clipFromLauncher;   // 剪贴板视图是否由启动器条目进入（决定 Esc 退回层级）
         private VscProjectView _vscView;
+        private FormatView _formatView;
         private ClipboardHistory _clipHistory;
         private ClipboardWatcher _clipWatcher;
         private bool _clipboardRegistered;
@@ -129,6 +131,12 @@ namespace PyTools
                 _vscView = new VscProjectView { PageStep = _config.PageStep };
                 if (_view != null) _vscView.Margin = _view.Margin; // 阴影呼吸区，必须与壳一致
                 _vscView.CloseRequested += HideSummon;
+
+                // 格式化视图（M4）：首个非列表型工具视图，同样寄居呼出壳。
+                // 无内部藏窗路径（Esc 走 App 层路由），不订阅 CloseRequested
+                _formatView = new FormatView();
+                if (_view != null) _formatView.Margin = _view.Margin;
+
                 _clipWatcher = new ClipboardWatcher(OnClipboardUpdate);
                 if (!_clipWatcher.Start()) Logger.Error("clipboard watcher failed to start");
 
@@ -152,6 +160,17 @@ namespace PyTools
                     {
                         if (_vscView.TryExitActionMode()) return;
                         ShowSummon();
+                        return;
+                    }
+                    if (ReferenceEquals(content, _formatView))
+                    {
+                        if (_formatView.TryExitActionMode()) return;
+                        ShowSummon();
+                        return;
+                    }
+                    if (ReferenceEquals(content, _clipView) && _clipFromLauncher)
+                    {
+                        ShowSummon(); // 启动器进入的剪贴板：Esc 回启动器空态（M3 定案）
                         return;
                     }
                     HideSummon();
@@ -191,12 +210,14 @@ namespace PyTools
                     // 调试模式：启动即显示且禁用失焦隐藏（与 v1 --debug 语义一致）
                     if (args.Contains("--clipboard")) ShowClipboard();
                     else if (args.Contains("--vsc")) ShowVsc();
+                    else if (args.Contains("--format")) ShowFormat();
                     else ShowSummon();
                     if (_debugQuery != null)
                     {
                         // --query 配套当前视图：截图自验用
                         if (args.Contains("--clipboard")) _clipView.SearchBox.Text = _debugQuery;
                         else if (args.Contains("--vsc")) _vscView.SearchBox.Text = _debugQuery;
+                        else if (args.Contains("--format")) { /* 编辑区无查询语义 */ }
                         else _view.SearchBox.Text = _debugQuery;
                     }
                 }
@@ -320,8 +341,20 @@ namespace PyTools
             ShowShell(_vscView, _vscView.ResetForVsc, "vsc");
         }
 
+        /// <summary>格式化视图（M4）：由启动器内置命令条目进入。</summary>
+        private void ShowFormat()
+        {
+            ShowShell(_formatView, _formatView.ResetForFormat, "format");
+        }
+
         private void ShowClipboard()
         {
+            ShowClipboard(fromLauncher: false);
+        }
+
+        private void ShowClipboard(bool fromLauncher)
+        {
+            _clipFromLauncher = fromLauncher; // 启动器进入：Esc 先回启动器空态（M3 定案）；热键直呼：Esc 一步藏窗
             ShowShell(_clipView, _clipView.ResetForClipboard, "clipboard");
         }
 
@@ -349,6 +382,7 @@ namespace PyTools
             // 切视图前统一收动作面板：面板是独立 Popup HWND，不随 Content 切换而消失（与 HideSummon 同理）
             _view.ExitActionMode();
             _vscView.ExitActionMode();
+            _formatView.ExitActionMode();
             reset();
 
             if (!alreadyVisible)
@@ -394,6 +428,7 @@ namespace PyTools
             // 动作面板是独立 Popup HWND，不随主窗隐藏而消失，必须显式关（否则藏窗后面板残留屏幕）
             _view.ExitActionMode();
             _vscView.ExitActionMode();
+            _formatView.ExitActionMode();
 
             // 位置记忆（沿用 v1 的 windowBounds 键）
             _config.SaveBounds(_window.Left, _window.Top, _window.Width, _window.Height);
@@ -561,6 +596,43 @@ namespace PyTools
             if (_view != null) _view.OnAppsReplaced();
         }
 
+        /// <summary>
+        /// 动作型条目「格式化剪贴板」：静默执行（不弹窗、不切视图）——读剪贴板 → 自动识别
+        /// JSON/XML → 固定 2 空格格式化 → 写回 → 托盘气泡报结果；失败同样走气泡（M4 定案）。
+        /// </summary>
+        private void RunFormatClipboardAction()
+        {
+            HideSummon(); // 动作语义：窗口都不闪一下，收起后气泡反馈
+            string input;
+            try { input = Clipboard.GetText(); }
+            catch (Exception ex)
+            {
+                _tray.ShowBubble("格式化剪贴板", "读取剪贴板失败：" + ex.Message);
+                return;
+            }
+            if (string.IsNullOrWhiteSpace(input))
+            {
+                _tray.ShowBubble("格式化剪贴板", "剪贴板没有内容");
+                return;
+            }
+            try
+            {
+                var result = StructuredFormats.Process(input, "format", "auto", "2");
+                Clipboard.SetText(result.Output);
+                var name = result.Format == "json" ? "JSON" : "XML";
+                _tray.ShowBubble("格式化剪贴板",
+                    "已格式化并写回（" + name + "，" + input.Length + " → " + result.Output.Length + " 字符）");
+            }
+            catch (FormatException err)
+            {
+                _tray.ShowBubble("格式化剪贴板", err.Message);
+            }
+            catch (Exception ex)
+            {
+                _tray.ShowBubble("格式化剪贴板", "写回剪贴板失败：" + ex.Message);
+            }
+        }
+
         private void OnScanFinished()
         {
             var count = _index.Apps.Count;
@@ -574,10 +646,13 @@ namespace PyTools
 
         private void OnLaunchRequested(AppEntry entry)
         {
-            // 内置命令条目（M4 工具入口）：切工具视图，不当作文件启动
+            // 内置命令条目（M4 工具入口）：按 Kind 切视图或执行动作，不当作文件启动
             if (entry != null && entry.IsCommand)
             {
                 if (string.Equals(entry.CommandId, "vsc", StringComparison.OrdinalIgnoreCase)) ShowVsc();
+                else if (string.Equals(entry.CommandId, "clipboard", StringComparison.OrdinalIgnoreCase)) ShowClipboard(fromLauncher: true);
+                else if (string.Equals(entry.CommandId, "format", StringComparison.OrdinalIgnoreCase)) ShowFormat();
+                else if (string.Equals(entry.CommandId, "format-clipboard", StringComparison.OrdinalIgnoreCase)) RunFormatClipboardAction();
                 return;
             }
 

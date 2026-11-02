@@ -155,9 +155,11 @@ namespace PyTools.Views
                 _items.Add(vm);
             }
 
-            // 内置命令入口（M4 工具入口）排在应用之前：输 vsc 回车即切到工具视图
-            var command = BuiltinCommands.Match(query);
-            if (command != null) _items.Insert(0, new ItemVM { Entry = command });
+            // 内置条目（M4 工具入口/快捷动作）排在应用之前：同词可命中多条（format 面板 + 格式化剪贴板动作），
+            // MatchAll 已按 rank+声明序排列（面板条目在前），逆序头插保持该顺序
+            var commands = BuiltinCommands.MatchAll(query);
+            for (var i = commands.Count - 1; i >= 0; i--)
+                _items.Insert(0, new ItemVM { Entry = commands[i] });
 
             PART_List.ItemsSource = null;
             PART_List.ItemsSource = _items;

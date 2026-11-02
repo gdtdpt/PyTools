@@ -17,6 +17,8 @@
     <SolidColorBrush x:Key="Text.Secondary" Color="#6E7681"/>
     <SolidColorBrush x:Key="Text.Placeholder" Color="#9EA0A4"/>
     <SolidColorBrush x:Key="Accent" Color="#2F6BED"/>
+    <SolidColorBrush x:Key="Text.Success" Color="#1A7F37"/>
+    <SolidColorBrush x:Key="Text.Error" Color="#CF222E"/>
     <SolidColorBrush x:Key="Bg.Toast" Color="#323A48"/>
     <SolidColorBrush x:Key="Text.OnToast" Color="#FFFFFF"/>
 

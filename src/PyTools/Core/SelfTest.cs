@@ -464,6 +464,68 @@ namespace PyTools.Core
                 return BuiltinCommands.Match("zzz") == null ? null : "无关查询误命中";
             }));
 
+            results.Add(Test("内置命令：剪贴板唤醒词（clipboard/剪贴板/标题拼音首字母）命中", () =>
+            {
+                var full = BuiltinCommands.Match("clipboard");
+                if (full == null || !full.IsCommand || full.CommandId != "clipboard") return "clipboard 未命中";
+                var prefix = BuiltinCommands.Match("clip");
+                if (prefix == null || prefix.CommandId != "clipboard") return "前缀 clip 未命中";
+                var cn = BuiltinCommands.Match("剪贴板");
+                if (cn == null || cn.CommandId != "clipboard") return "中文别名未命中";
+                if (Pinyin.Ready)
+                {
+                    var initials = BuiltinCommands.Match("jtbjl");
+                    if (initials == null || initials.CommandId != "clipboard") return "标题拼音首字母未命中";
+                }
+                return BuiltinCommands.Match("vsc").CommandId == "vsc" ? null : "vsc 被误改";
+            }));
+
+            results.Add(Test("内置命令：format 同词双条目（面板在前、动作在后）", () =>
+            {
+                var all = BuiltinCommands.MatchAll("format");
+                if (all.Count != 2) return "期望 2 条，实际 " + all.Count;
+                if (all[0].CommandId != "format" || all[1].CommandId != "format-clipboard")
+                    return "顺序错误：" + all[0].CommandId + "," + all[1].CommandId;
+                var cn = BuiltinCommands.MatchAll("格式化");
+                if (cn.Count != 2 || cn[0].CommandId != "format") return "中文词双条目未命中";
+                return null;
+            }));
+
+            results.Add(Test("StructuredFormats：JSON 格式化 2 空格 / 压缩（键序保持）", () =>
+            {
+                var fmt = StructuredFormats.Process("{\"b\":1,\"a\":[1,2],\"s\":\"x\\n\\\"y\\\"\"}", "format", "auto", "2");
+                var expect = "{\n  \"b\": 1,\n  \"a\": [\n    1,\n    2\n  ],\n  \"s\": \"x\\n\\\"y\\\"\"\n}";
+                if (fmt.Format != "json" || fmt.Output != expect) return "格式化输出不符:\n" + fmt.Output;
+                var min = StructuredFormats.Process("{\n  \"b\": 1,\n  \"a\": [1, 2]\n}", "minify", "json", "2");
+                if (min.Output != "{\"b\":1,\"a\":[1,2]}") return "压缩输出不符: " + min.Output;
+                var tab = StructuredFormats.Process("{\"a\":1}", "format", "auto", "tab");
+                if (tab.Output != "{\n\t\"a\": 1\n}") return "Tab 缩进不符: " + tab.Output;
+                return null;
+            }));
+
+            results.Add(Test("StructuredFormats：XML 保真格式化（注释/CDATA/混合内容）与压缩", () =>
+            {
+                var fmt = StructuredFormats.Process(
+                    "<root><a x=\"1\">text</a><!-- 注释 --><![CDATA[cdata<raw>]]><b/></root>", "format", "auto", "2");
+                var expect = "<root>\n  <a x=\"1\">text</a>\n  <!-- 注释 -->\n  <![CDATA[cdata<raw>]]>\n  <b/>\n</root>";
+                if (fmt.Format != "xml" || fmt.Output != expect) return "格式化输出不符:\n" + fmt.Output;
+                var min = StructuredFormats.Process(
+                    "<root>\n  <a x = \"1\" > text </a>\n</root>", "minify", "xml", "2");
+                if (min.Output != "<root><a x=\"1\"> text </a></root>") return "压缩输出不符: " + min.Output;
+                return null;
+            }));
+
+            results.Add(Test("StructuredFormats：非法输入抛 FormatException（v1 语义）", () =>
+            {
+                try { StructuredFormats.Process("{bad json", "format", "auto", "2"); return "JSON 未报错"; }
+                catch (FormatException) { }
+                try { StructuredFormats.Process("<a><b></a>", "format", "auto", "2"); return "XML 层级未报错"; }
+                catch (FormatException) { }
+                try { StructuredFormats.Process("", "format", "auto", "2"); return "空串未报错"; }
+                catch (FormatException) { }
+                return null;
+            }));
+
             var failed = 0;
             var lines = new List<string>();
             foreach (var r in results)
