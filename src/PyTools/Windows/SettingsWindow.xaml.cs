@@ -19,19 +19,21 @@ namespace PyTools.Windows
         private readonly AppIndex _index;
         private readonly Func<string, string> _hotkeyApplier;                  // 主热键：null=成功，否则错误文案
         private readonly Func<string, bool, string> _clipboardHotkeyApplier;   // 剪贴板热键（key, enabled）
+        private readonly Func<string> _positionResetter;                       // 恢复默认呼出位置：null=成功，否则错误文案
 
         private bool _loaded;          // Loaded 之前不响应控件事件
         private TextBox _captureBox;   // 正在捕获的输入框（null = 未在捕获）
         private TextBlock _captureHint;
 
         public SettingsWindow(AppConfig config, AppIndex index, Func<string, string> hotkeyApplier,
-            Func<string, bool, string> clipboardHotkeyApplier)
+            Func<string, bool, string> clipboardHotkeyApplier, Func<string> positionResetter)
         {
             InitializeComponent();
             _config = config;
             _index = index;
             _hotkeyApplier = hotkeyApplier;
             _clipboardHotkeyApplier = clipboardHotkeyApplier;
+            _positionResetter = positionResetter;
             SourceInitialized += (s, e) => SetDarkTitleBar();
         }
 
@@ -327,6 +329,15 @@ namespace PyTools.Windows
             SetHint(ContextMenuHint, enable ? "已开启（点击即生效）" : "已关闭");
             _config.AddAppContextMenu = live;
             _config.Save();
+        }
+
+        // ---- 呼出位置 ----
+
+        private void OnResetPosition(object sender, RoutedEventArgs e)
+        {
+            if (!_loaded) return;
+            var error = _positionResetter != null ? _positionResetter() : "功能不可用";
+            SetHint(PositionHint, error ?? "已恢复默认位置，下次呼出生效");
         }
 
         // ---- 翻页步长 ----

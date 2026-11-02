@@ -90,6 +90,14 @@ namespace PyTools.Core
             catch (Exception ex) { Logger.Error("save bounds failed: " + ex.Message); }
         }
 
+        /// <summary>清除位置记忆（下次呼出走默认位：水平居中、垂直上 1/3）。设置窗口「恢复默认位置」调用。</summary>
+        public void ResetBounds()
+        {
+            BoundsX = double.NaN; BoundsY = double.NaN;
+            try { _raw.Remove("windowBounds"); WriteBack(); }
+            catch (Exception ex) { Logger.Error("reset bounds failed: " + ex.Message); }
+        }
+
         public void SaveLiteMode(bool lite)
         {
             LiteMode = lite;

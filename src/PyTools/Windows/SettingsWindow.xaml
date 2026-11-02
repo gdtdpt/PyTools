@@ -70,6 +70,23 @@
             <CheckBox x:Name="LiteModeCheck" Content="简洁模式（不透明方角、无动效；重启生效）"
                       Foreground="{DynamicResource Text.Primary}" Margin="0,4"
                       Checked="OnLiteModeChanged" Unchecked="OnLiteModeChanged"/>
+            <Grid Margin="0,4">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="130"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="呼出位置" VerticalAlignment="Center"
+                           Foreground="{DynamicResource Text.Secondary}"/>
+                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <Button x:Name="ResetPositionButton" Content="恢复默认位置"
+                            Padding="12,4" Click="OnResetPosition"
+                            Background="{DynamicResource Bg.Input}"
+                            Foreground="{DynamicResource Text.Primary}"
+                            ToolTip="清除位置记忆，下次呼出回到默认位（水平居中、垂直上 1/3）"/>
+                    <TextBlock x:Name="PositionHint" Text="" VerticalAlignment="Center" Margin="12,0,0,0"
+                               FontSize="12" Foreground="{DynamicResource Text.Secondary}"/>
+                </StackPanel>
+            </Grid>
 
             <TextBlock Text="剪贴板"
                        FontSize="14" FontWeight="Bold"

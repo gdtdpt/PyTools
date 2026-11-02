@@ -29,6 +29,7 @@ namespace PyTools
         private SummonWindowBase _window;
         private SummonView _view;
         private ClipboardView _clipView;
+        private VscProjectView _vscView;
         private ClipboardHistory _clipHistory;
         private ClipboardWatcher _clipWatcher;
         private bool _clipboardRegistered;
@@ -123,6 +124,11 @@ namespace PyTools
                 // 切 Content 时必须沿用同一份边距，否则剪贴板视图的圆角处会出现尖刺伪影。
                 if (_view != null) _clipView.Margin = _view.Margin;
                 _clipView.SelectRequested += OnClipboardSelectRequested;
+
+                // VSCode 最近项目（M4 首项工具）：同样寄居呼出壳（切 Content），不新建窗口
+                _vscView = new VscProjectView { PageStep = _config.PageStep };
+                if (_view != null) _vscView.Margin = _view.Margin; // 阴影呼吸区，必须与壳一致
+                _vscView.CloseRequested += HideSummon;
                 _clipWatcher = new ClipboardWatcher(OnClipboardUpdate);
                 if (!_clipWatcher.Start()) Logger.Error("clipboard watcher failed to start");
 
@@ -133,9 +139,21 @@ namespace PyTools
                 };
                 _window.EscapePressed += delegate
                 {
-                    // Esc 分层退出：动作面板 → 结果列表 → 藏窗（唯一处理器；此前 M1 的直连
-                    // HideSummon 未摘除，先于本处理器执行导致动作面板开着 Esc 直接藏窗）
-                    if (_view.TryExitActionMode()) return;
+                    // Esc 分层退出（唯一处理器）：动作面板 → 视图自身层级 → 藏窗。
+                    // 工具视图（vsc）由启动器进入，退回启动器空态再按 Esc 才藏窗（M4 定案）。
+                    var content = _window.Content;
+                    if (ReferenceEquals(content, _view))
+                    {
+                        if (_view.TryExitActionMode()) return;
+                        HideSummon();
+                        return;
+                    }
+                    if (ReferenceEquals(content, _vscView))
+                    {
+                        if (_vscView.TryExitActionMode()) return;
+                        ShowSummon();
+                        return;
+                    }
                     HideSummon();
                 };
 
@@ -172,11 +190,13 @@ namespace PyTools
                 {
                     // 调试模式：启动即显示且禁用失焦隐藏（与 v1 --debug 语义一致）
                     if (args.Contains("--clipboard")) ShowClipboard();
+                    else if (args.Contains("--vsc")) ShowVsc();
                     else ShowSummon();
                     if (_debugQuery != null)
                     {
                         // --query 配套当前视图：截图自验用
                         if (args.Contains("--clipboard")) _clipView.SearchBox.Text = _debugQuery;
+                        else if (args.Contains("--vsc")) _vscView.SearchBox.Text = _debugQuery;
                         else _view.SearchBox.Text = _debugQuery;
                     }
                 }
@@ -294,6 +314,12 @@ namespace PyTools
             ShowShell(_view, _view.ResetForSummon, "apps");
         }
 
+        /// <summary>VSCode 项目视图（M4）：由启动器内置命令条目进入。</summary>
+        private void ShowVsc()
+        {
+            ShowShell(_vscView, _vscView.ResetForVsc, "vsc");
+        }
+
         private void ShowClipboard()
         {
             ShowShell(_clipView, _clipView.ResetForClipboard, "clipboard");
@@ -320,6 +346,9 @@ namespace PyTools
             }
 
             _window.Content = content;
+            // 切视图前统一收动作面板：面板是独立 Popup HWND，不随 Content 切换而消失（与 HideSummon 同理）
+            _view.ExitActionMode();
+            _vscView.ExitActionMode();
             reset();
 
             if (!alreadyVisible)
@@ -330,7 +359,13 @@ namespace PyTools
                 _window.Show();
                 _window.Activate();
             }
-            _window.FocusSearch();
+            // 焦点交给内容视图搜索框。必须延迟到 Loaded 优先级：窗口可见中切换 Content 时，
+            // 新视图的 Loaded 在下一拍才触发，同步调用 Focus() 会因 IsLoaded=false 静默失败
+            // （首呼出路径 Window.Show() 同步完成 Loaded，所以该问题只在视图间切换时暴露）。
+            // 焦点交给内容视图搜索框。必须延迟到 Loaded 优先级：窗口可见中切换 Content 时，
+            // 新视图的 Loaded 在下一拍才触发，同步调用 Focus() 会因 IsLoaded=false 静默失败
+            // （首呼出路径 Window.Show() 同步完成 Loaded，所以该问题只在视图间切换时暴露）。
+            Dispatcher.BeginInvoke(new Action(delegate { _window.FocusSearch(); }), System.Windows.Threading.DispatcherPriority.Loaded);
 
             if (!alreadyVisible)
             {
@@ -358,6 +393,7 @@ namespace PyTools
 
             // 动作面板是独立 Popup HWND，不随主窗隐藏而消失，必须显式关（否则藏窗后面板残留屏幕）
             _view.ExitActionMode();
+            _vscView.ExitActionMode();
 
             // 位置记忆（沿用 v1 的 windowBounds 键）
             _config.SaveBounds(_window.Left, _window.Top, _window.Width, _window.Height);
@@ -538,6 +574,13 @@ namespace PyTools
 
         private void OnLaunchRequested(AppEntry entry)
         {
+            // 内置命令条目（M4 工具入口）：切工具视图，不当作文件启动
+            if (entry != null && entry.IsCommand)
+            {
+                if (string.Equals(entry.CommandId, "vsc", StringComparison.OrdinalIgnoreCase)) ShowVsc();
+                return;
+            }
+
             var result = AppLauncher.Open(entry, _index.Roots, _index.Custom);
             if (result == null)
             {
@@ -643,31 +686,8 @@ namespace PyTools
 
         private string OpenTerminal(string shell, string dir)
         {
-            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return "目录不存在：" + dir;
-            try
-            {
-                if (shell == "cmd")
-                {
-                    Process.Start(new ProcessStartInfo
-                    {
-                        FileName = "cmd.exe",
-                        Arguments = "/k cd /d \"" + dir + "\"",
-                        UseShellExecute = true
-                    });
-                }
-                else
-                {
-                    var escaped = dir.Replace("'", "''");
-                    Process.Start(new ProcessStartInfo
-                    {
-                        FileName = "powershell.exe",
-                        Arguments = "-NoExit -Command \"Set-Location -LiteralPath '" + escaped + "'\"",
-                        UseShellExecute = true
-                    });
-                }
-                return null;
-            }
-            catch (Exception ex) { return "打开终端失败：" + ex.Message; }
+            // 统一走 TerminalLauncher（与 vsc 工具的项目动作同一实现，避免两套终端启动逻辑漂移）
+            return shell == "cmd" ? TerminalLauncher.OpenCmd(dir) : TerminalLauncher.OpenPowerShell(dir);
         }
 
         // ---- 静默添加（M2b，L9）----
@@ -736,7 +756,7 @@ namespace PyTools
                 _settingsWindow.Activate();
                 return;
             }
-            _settingsWindow = new SettingsWindow(_config, _index, ApplyHotkey, ApplyClipboardHotkey);
+            _settingsWindow = new SettingsWindow(_config, _index, ApplyHotkey, ApplyClipboardHotkey, ResetSummonPosition);
             _settingsWindow.Closed += (sender, eventArgs) => _settingsWindow = null;
             _settingsWindow.Show();
         }
@@ -753,6 +773,19 @@ namespace PyTools
             _config.Hotkey = newHotkey;
             _config.Save();
             return null;
+        }
+
+        /// <summary>恢复默认呼出位置（设置窗口调用）：清除位置记忆；呼出中则立即归位。
+        /// null = 成功，否则错误文案。</summary>
+        private string ResetSummonPosition()
+        {
+            try
+            {
+                _config.ResetBounds();
+                if (_window != null && _window.IsVisible && !_hiding) EnsureOnScreen();
+                return null;
+            }
+            catch (Exception ex) { return "恢复失败：" + ex.Message; }
         }
 
         // ---- 退出 ----
