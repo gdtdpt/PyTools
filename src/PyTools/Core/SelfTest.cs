@@ -377,6 +377,74 @@ namespace PyTools.Core
                 finally { TryDeleteDir(dir); }
             }));
 
+            results.Add(Test("剪贴板：无效 alpha 校正（a=0 且 RGB 完好 → 不透明，有效 alpha 不动）", () =>
+            {
+                const int width = 8, height = 6, stride = width * 4;
+                // 模拟坏 DIB：RGB 有内容、alpha 全 0
+                var pixels = new byte[stride * height];
+                for (var i = 0; i < pixels.Length; i += 4) { pixels[i] = 30; pixels[i + 1] = 120; pixels[i + 2] = 200; pixels[i + 3] = 0; }
+                var broken = BitmapSource.Create(width, height, 96, 96, PixelFormats.Bgra32, null, pixels, stride);
+                var fixedImage = ClipboardHistory.CoerceBrokenAlpha(broken);
+                var check = new byte[stride * height];
+                fixedImage.CopyPixels(check, stride, 0);
+                for (var i = 3; i < check.Length; i += 4)
+                    if (check[i] != 255) return "a=0 未校正为不透明";
+                if (check[0] != 30 || check[2] != 200) return "RGB 内容被破坏";
+
+                // 有效 alpha（部分透明）应原样保留，不被强制
+                var validPixels = new byte[stride * height];
+                for (var i = 0; i < validPixels.Length; i += 4) { validPixels[i] = 1; validPixels[i + 3] = 128; }
+                var valid = BitmapSource.Create(width, height, 96, 96, PixelFormats.Bgra32, null, validPixels, stride);
+                var untouched = ClipboardHistory.CoerceBrokenAlpha(valid);
+                var check2 = new byte[stride * height];
+                untouched.CopyPixels(check2, stride, 0);
+                return check2[3] == 128 ? null : "有效 alpha 被改写: " + check2[3];
+            }));
+
+            results.Add(Test("剪贴板：存量坏 PNG 惰性修复（缩略图触发重写 + sha1 更新）", () =>
+            {
+                var dir = TempClipDir();
+                try
+                {
+                    var images = Path.Combine(dir, "clipboard-history", "images");
+                    Directory.CreateDirectory(images);
+                    // 构造坏 PNG：Bgra32 RGB 内容 + alpha 全 0
+                    const int width = 40, height = 30, stride = width * 4;
+                    var pixels = new byte[stride * height];
+                    for (var i = 0; i < pixels.Length; i += 4) { pixels[i] = 10; pixels[i + 1] = 20; pixels[i + 2] = 30; pixels[i + 3] = 0; }
+                    var source = BitmapSource.Create(width, height, 96, 96, PixelFormats.Bgra32, null, pixels, stride);
+                    var encoder = new PngBitmapEncoder();
+                    encoder.Frames.Add(BitmapFrame.Create(source));
+                    byte[] brokenPng;
+                    using (var stream = new MemoryStream()) { encoder.Save(stream); brokenPng = stream.ToArray(); }
+                    File.WriteAllBytes(Path.Combine(images, "img-broken.png"), brokenPng);
+                    File.WriteAllText(Path.Combine(dir, "clipboard-history.json"),
+                        "{\"version\":1,\"records\":[{\"id\":\"img-broken\",\"type\":\"image\",\"createdAt\":1,\"updatedAt\":2,\"imageFile\":\"img-broken.png\"}]}");
+
+                    var history = new ClipboardHistory(dir);
+                    var record = history.Records[0];
+                    var thumb = history.GetThumbnail(record);
+                    if (thumb == null) return "缩略图解码失败";
+
+                    // 磁盘 PNG 应已重写为不透明，且 RGB 内容保留
+                    var redecoded = new BitmapImage();
+                    redecoded.BeginInit();
+                    redecoded.UriSource = new Uri(history.ImageFile("img-broken"), UriKind.Absolute);
+                    redecoded.CacheOption = BitmapCacheOption.OnLoad;
+                    redecoded.CreateOptions = BitmapCreateOptions.IgnoreImageCache;
+                    redecoded.EndInit();
+                    var stride2 = redecoded.PixelWidth * 4;
+                    var check = new byte[stride2 * redecoded.PixelHeight];
+                    redecoded.CopyPixels(check, stride2, 0);
+                    for (var i = 3; i < check.Length; i += 4)
+                        if (check[i] != 255) return "PNG 未修复为不透明";
+                    if (check[0] != 10 || check[2] != 30) return "修复后 RGB 内容被破坏";
+                    var sha1 = ClipboardHistory.Sha1Hex(File.ReadAllBytes(history.ImageFile("img-broken")));
+                    return record.ImageSha1 == sha1 ? null : "sha1 未同步更新";
+                }
+                finally { TryDeleteDir(dir); }
+            }));
+
             results.Add(Test("剪贴板：预览截断到 200 字", () =>
             {
                 var record = new ClipRecord { Kind = ClipKind.Text, Text = new string('a', 300) };
@@ -523,6 +591,85 @@ namespace PyTools.Core
                 catch (FormatException) { }
                 try { StructuredFormats.Process("", "format", "auto", "2"); return "空串未报错"; }
                 catch (FormatException) { }
+                return null;
+            }));
+
+            results.Add(Test("TextEncoders：URL 保留字符集与往返（对齐 JS encodeURIComponent）", () =>
+            {
+                var enc = TextEncoders.Convert("中文 a!~*'()-._", "url", "encode");
+                if (enc != "%E4%B8%AD%E6%96%87%20a!~*'()-._") return "编码输出不符: " + enc;
+                var dec = TextEncoders.Convert(enc, "url", "decode");
+                if (dec != "中文 a!~*'()-._") return "解码往返不符: " + dec;
+                try { TextEncoders.Convert("%E4%B", "url", "decode"); return "不完整 % 序列未报错"; }
+                catch (FormatException) { }
+                try { TextEncoders.Convert("%ZZ", "url", "decode"); return "非法 hex 未报错"; }
+                catch (FormatException) { }
+                return null;
+            }));
+
+            results.Add(Test("TextEncoders：Base64 双向（UTF-8、去空白、容忍缺省 padding、严格解码报错）", () =>
+            {
+                var enc = TextEncoders.Convert("中文", "base64", "encode");
+                if (enc != "5Lit5paH") return "编码输出不符: " + enc;
+                if (TextEncoders.Convert("5Lit 5paH\t", "base64", "decode") != "中文") return "空白剥离失败";
+                if (TextEncoders.Convert("QQ", "base64", "decode") != "A") return "缺省 padding 失败";
+                try { TextEncoders.Convert("//8=", "base64", "decode"); return "非法 UTF-8 序列未报错"; }
+                catch (FormatException) { }
+                try { TextEncoders.Convert("!!", "base64", "decode"); return "非法字符未报错"; }
+                catch (FormatException) { }
+                return null;
+            }));
+
+            results.Add(Test("TextEncoders：Unicode 转义（UTF-16 码元、\\u 与 \\x、大小写）", () =>
+            {
+                var enc = TextEncoders.Convert("中A", "unicode", "encode");
+                if (enc != "\\u4e2d\\u0041") return "编码输出不符: " + enc;
+                var dec = TextEncoders.Convert("\\u4E2D\\x41", "unicode", "decode");
+                if (dec != "中A") return "解码不符: " + dec;
+                return null;
+            }));
+
+            results.Add(Test("TextEncoders：HTML 实体（5 字符编码；解码覆盖数字与命名实体）", () =>
+            {
+                var enc = TextEncoders.Convert("<a \"b\" 'c' &>", "html", "encode");
+                if (enc != "&lt;a &quot;b&quot; &#39;c&#39; &amp;&gt;") return "编码输出不符: " + enc;
+                var dec = TextEncoders.Convert("&lt;div&gt;&amp;&#x4E2D;&copy;<keep>", "html", "decode");
+                if (dec != "<div>&中©<keep>") return "解码不符: " + dec;
+                return null;
+            }));
+
+            results.Add(Test("TextEncoders：JSON 字面量双向（非 ASCII 保留、pretty 2 空格、类型约束）", () =>
+            {
+                var enc = TextEncoders.Convert("{\"a\":\"中\"}", "json", "encode");
+                if (enc != "\"{\\\"a\\\":\\\"中\\\"}\"") return "编码输出不符: " + enc;
+                var dec = TextEncoders.Convert("\"{\\\"a\\\":1}\"", "json", "decode");
+                if (dec != "{\n  \"a\": 1\n}") return "字符串方向解码不符:\n" + dec;
+                var decObj = TextEncoders.Convert("{\"a\":[1,2]}", "json", "decode");
+                if (decObj != "{\n  \"a\": [\n    1,\n    2\n  ]\n}") return "对象方向解码不符:\n" + decObj;
+                try { TextEncoders.Convert("123", "json", "encode"); return "数字输入未报错"; }
+                catch (FormatException) { }
+                return null;
+            }));
+
+            results.Add(Test("TextEncoders：Hex 双向（0x/空白/逗号剥离、奇数与非法报错）", () =>
+            {
+                var enc = TextEncoders.Convert("中", "hex", "encode");
+                if (enc != "e4 b8 ad") return "编码输出不符: " + enc;
+                var dec = TextEncoders.Convert("0xE4 0xB8,0xAD", "hex", "decode");
+                if (dec != "中") return "解码不符: " + dec;
+                try { TextEncoders.Convert("e4 b8", "hex", "decode"); return "奇数长度未报错"; }
+                catch (FormatException) { }
+                try { TextEncoders.Convert("", "hex", "decode"); return "空输入未报错"; }
+                catch (FormatException) { }
+                return null;
+            }));
+
+            results.Add(Test("内置命令：encode 唤醒词命中", () =>
+            {
+                var hit = BuiltinCommands.Match("encode");
+                if (hit == null || !hit.IsCommand || hit.CommandId != "encode") return "encode 未命中";
+                var cn = BuiltinCommands.Match("编码");
+                if (cn == null || cn.CommandId != "encode") return "中文别名未命中";
                 return null;
             }));
 

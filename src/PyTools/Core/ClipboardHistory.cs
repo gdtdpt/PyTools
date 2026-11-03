@@ -6,6 +6,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Web.Script.Serialization;
 using System.Windows;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
 
 namespace PyTools.Core
@@ -67,7 +68,7 @@ namespace PyTools.Core
             }
         }
 
-        /// <summary>副标题：文本字数 / 文件个数 / 图片尺寸（尺寸在缩略图解码后回填）。</summary>
+        /// <summary>副标题：文本字数 / 文件个数 / 图片尺寸（捕获时记录；重启后由缩略图路径从 PNG 头回填）。</summary>
         public string Subtitle
         {
             get
@@ -354,6 +355,7 @@ namespace PyTools.Core
         /// <summary>
         /// 按记录 id 缓存缩略图。只解 ThumbDecodeEdge 宽（WPF 解码期缩放，不产生全尺寸位图）。
         /// 列表虚拟化下仅对已实现的容器调用，100 条历史不会全量解码。
+        /// 缩略图整图透明 = 存量坏数据（早期捕获未校正无效 alpha），触发惰性修复后重解码。
         /// </summary>
         public BitmapSource GetThumbnail(ClipRecord record)
         {
@@ -362,15 +364,20 @@ namespace PyTools.Core
             if (_thumbs.TryGetValue(record.Id, out cached)) return cached;
             try
             {
-                var image = new BitmapImage();
-                image.BeginInit();
-                image.UriSource = new Uri(ImageFile(record.Id), UriKind.Absolute);
-                image.DecodePixelWidth = ThumbDecodeEdge;
-                image.CacheOption = BitmapCacheOption.OnLoad; // 读完即释放文件句柄
-                image.CreateOptions = BitmapCreateOptions.IgnoreImageCache;
-                image.EndInit();
-                image.Freeze();
-                record.SetImageSize(image.PixelWidth, image.PixelHeight);
+                var image = DecodeThumb(record.Id);
+                if (IsFullyTransparent(image))
+                {
+                    RepairIfBroken(record);
+                    image = DecodeThumb(record.Id);
+                }
+                if (image == null) return null;
+                int width, height;
+                if (!ReadPngDimensions(ImageFile(record.Id), out width, out height))
+                {
+                    width = image.PixelWidth;
+                    height = image.PixelHeight;
+                }
+                record.SetImageSize(width, height);
                 _thumbs[record.Id] = image;
                 return image;
             }
@@ -381,24 +388,82 @@ namespace PyTools.Core
             }
         }
 
-        private BitmapSource DecodeFull(ClipRecord record)
+        private BitmapImage DecodeThumb(string id)
         {
+            var image = new BitmapImage();
+            image.BeginInit();
+            image.UriSource = new Uri(ImageFile(id), UriKind.Absolute);
+            image.DecodePixelWidth = ThumbDecodeEdge;
+            image.CacheOption = BitmapCacheOption.OnLoad; // 读完即释放文件句柄
+            image.CreateOptions = BitmapCreateOptions.IgnoreImageCache;
+            image.EndInit();
+            image.Freeze();
+            return image;
+        }
+
+        /// <summary>
+        /// 存量坏数据修复：早期捕获未校正剪贴板无效 alpha，PNG 为「RGB 完好、alpha 全 0」→ 图片完全不可见。
+        /// 全图扫描判定 → 强制不透明 → 重写文件 → 更新 sha1/签名并落盘（下一次同内容捕获不会因签名漂移而重复入库）。
+        /// 返回修复后的完整解码图；未损坏则原样返回解码结果；文件缺失/解码失败返回 null。
+        /// </summary>
+        private BitmapSource RepairIfBroken(ClipRecord record)
+        {
+            byte[] rawPng;
+            try { rawPng = File.ReadAllBytes(ImageFile(record.Id)); }
+            catch (Exception ex) { Logger.Error("clipboard image read failed: " + ex.Message); return null; }
+
+            BitmapSource decoded;
             try
             {
-                var image = new BitmapImage();
-                image.BeginInit();
-                image.UriSource = new Uri(ImageFile(record.Id), UriKind.Absolute);
-                image.CacheOption = BitmapCacheOption.OnLoad;
-                image.CreateOptions = BitmapCreateOptions.IgnoreImageCache;
-                image.EndInit();
-                image.Freeze();
-                return image;
+                // PngBitmapDecoder 直解（文件恒为 PNG）：BitmapImage + StreamSource 在此场景会抛
+                // 「键不能为 null」(ArgumentNullException key)，解码管线异常原因不明，绕开
+                var decoder = new PngBitmapDecoder(new MemoryStream(rawPng),
+                    BitmapCreateOptions.IgnoreImageCache, BitmapCacheOption.OnLoad);
+                decoded = decoder.Frames[0];
+                decoded.Freeze();
             }
             catch (Exception ex)
             {
                 Logger.Error("clipboard image decode failed: " + ex.Message);
                 return null;
             }
+
+            if (!IsFullyTransparent(decoded)) return decoded;
+
+            var stride = decoded.PixelWidth * 4;
+            var buffer = new byte[stride * decoded.PixelHeight];
+            decoded.CopyPixels(buffer, stride, 0);
+            for (var i = 3; i < buffer.Length; i += 4) buffer[i] = 255;
+            var fixedImage = BitmapSource.Create(decoded.PixelWidth, decoded.PixelHeight,
+                decoded.DpiX, decoded.DpiY, PixelFormats.Bgra32, null, buffer, stride);
+
+            byte[] rewritten;
+            var encoder = new PngBitmapEncoder();
+            encoder.Frames.Add(BitmapFrame.Create(fixedImage));
+            using (var stream = new MemoryStream())
+            {
+                encoder.Save(stream);
+                rewritten = stream.ToArray();
+            }
+            try
+            {
+                File.WriteAllBytes(ImageFile(record.Id), rewritten);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("clipboard image repair write failed: " + ex.Message);
+                return fixedImage; // 内存里已可用，落盘失败下次再试
+            }
+            record.ImageSha1 = Sha1Hex(rewritten);
+            record.Signature = "image:" + record.ImageSha1;
+            Save();
+            Logger.Info("clipboard image alpha repaired: " + record.Id);
+            return fixedImage;
+        }
+
+        private BitmapSource DecodeFull(ClipRecord record)
+        {
+            return RepairIfBroken(record);
         }
 
         public string ImageFile(string id)
@@ -450,6 +515,7 @@ namespace PyTools.Core
             height = source.PixelHeight;
             if (width <= 0 || height <= 0) return false;
             if ((long)width * height > MaxImagePixels) return false;
+            source = CoerceBrokenAlpha(source);
 
             var encoder = new PngBitmapEncoder();
             encoder.Frames.Add(BitmapFrame.Create(source));
@@ -459,6 +525,74 @@ namespace PyTools.Core
                 png = stream.ToArray();
             }
             return png.Length > 0;
+        }
+
+        /// <summary>
+        /// 无效 alpha 校正：部分程序拷贝的 32 位 DIB alpha 字节全 0（RGB 内容完好），
+        /// 直接编码会得到「全透明但文件很大」的 PNG——缩略图、写回全部肉眼不可见。
+        /// 全 0 视为无效 alpha，按不透明处理：在原始字节上强制 alpha=255（Pbgra32/Bgra32
+        /// 字节布局一致，不经过 FormatConvertedBitmap——预乘换算会把 a=0 的 RGB 清零）。
+        /// internal 仅供 selftest。
+        /// </summary>
+        internal static BitmapSource CoerceBrokenAlpha(BitmapSource source)
+        {
+            if (source.Format != PixelFormats.Pbgra32 && source.Format != PixelFormats.Bgra32) return source;
+            try
+            {
+                var stride = source.PixelWidth * 4;
+                var buffer = new byte[stride * source.PixelHeight];
+                source.CopyPixels(buffer, stride, 0);
+                var hasAlpha = false;
+                for (var i = 3; i < buffer.Length; i += 4)
+                {
+                    if (buffer[i] != 0) { hasAlpha = true; break; }
+                }
+                if (hasAlpha) return source;
+                for (var i = 3; i < buffer.Length; i += 4) buffer[i] = 255;
+                return BitmapSource.Create(source.PixelWidth, source.PixelHeight,
+                    source.DpiX, source.DpiY, PixelFormats.Bgra32, null, buffer, stride);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("clipboard alpha coerce failed: " + ex.Message);
+                return source;
+            }
+        }
+
+        /// <summary>整图 alpha 全 0 判定（BGRA 系格式才检查；其他格式直接返回 false）。</summary>
+        private static bool IsFullyTransparent(BitmapSource image)
+        {
+            if (image == null) return false;
+            if (image.Format != PixelFormats.Pbgra32 && image.Format != PixelFormats.Bgra32) return false;
+            try
+            {
+                var stride = image.PixelWidth * 4;
+                var buffer = new byte[stride * image.PixelHeight];
+                image.CopyPixels(buffer, stride, 0);
+                for (var i = 3; i < buffer.Length; i += 4)
+                    if (buffer[i] != 0) return false;
+                return true;
+            }
+            catch { return false; }
+        }
+
+        /// <summary>从 PNG IHDR（前 24 字节）读原图尺寸——避免 64px 缩略图解码后把副标题的尺寸填成缩略图尺寸。</summary>
+        private static bool ReadPngDimensions(string path, out int width, out int height)
+        {
+            width = 0; height = 0;
+            try
+            {
+                var header = new byte[24];
+                using (var stream = File.OpenRead(path))
+                {
+                    if (stream.Read(header, 0, 24) != 24) return false;
+                }
+                if (header[0] != 0x89 || header[1] != (byte)'P' || header[2] != (byte)'N') return false;
+                width = (header[16] << 24) | (header[17] << 16) | (header[18] << 8) | header[19];
+                height = (header[20] << 24) | (header[21] << 16) | (header[22] << 8) | header[23];
+                return width > 0 && height > 0;
+            }
+            catch { return false; }
         }
 
         /// <summary>隐私格式判定：返回跳过原因（null = 不跳过）。</summary>
