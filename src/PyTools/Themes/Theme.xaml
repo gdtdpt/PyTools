@@ -22,6 +22,15 @@
     <SolidColorBrush x:Key="Bg.Toast" Color="#323A48"/>
     <SolidColorBrush x:Key="Text.OnToast" Color="#FFFFFF"/>
 
+    <!-- 控件态令牌（2026-11-03 控件规范化）：只补交互态缺口，不动既有色值 -->
+    <SolidColorBrush x:Key="Border.Hover" Color="#C9D4EA"/>    <!-- 输入类 hover 边框（带一点蓝的灰）-->
+    <SolidColorBrush x:Key="Accent.Hover" Color="#4A7EF0"/>    <!-- Accent 按钮悬停（亮一档）-->
+    <SolidColorBrush x:Key="Accent.Pressed" Color="#2258C7"/>  <!-- Accent 按钮按下 -->
+    <SolidColorBrush x:Key="Accent.Soft" Color="#E3EAFB"/>     <!-- Accent 淡底：单选选中 / 主按钮禁用 -->
+    <SolidColorBrush x:Key="Bg.Disabled" Color="#F2F3F5"/>     <!-- 禁用底 -->
+    <SolidColorBrush x:Key="Text.Disabled" Color="#9EA0A4"/>   <!-- 禁用文字（与 Placeholder 同值，语义分离）-->
+    <SolidColorBrush x:Key="Text.OnAccentDisabled" Color="#9DB4EE"/> <!-- 主按钮禁用时压在淡蓝底上的文字 -->
+
     <!-- 字号 -->
     <system:Double xmlns:system="clr-namespace:System;assembly=mscorlib" x:Key="Font.Base">14</system:Double>
     <system:Double xmlns:system="clr-namespace:System;assembly=mscorlib" x:Key="Font.Secondary">12</system:Double>
@@ -45,6 +54,10 @@
     <system:Double xmlns:system="clr-namespace:System;assembly=mscorlib" x:Key="Layout.ListMaxHeight">480</system:Double>
     <Thickness x:Key="Layout.SearchPadding">14,0,14,0</Thickness>
     <Thickness x:Key="Layout.ItemMargin">8,2,8,2</Thickness>
+    <!-- 控件标准高：按钮 / 输入框 / 胶囊单选 / 下拉 / 切换块统一（工具面板与设置窗口同值） -->
+    <system:Double xmlns:system="clr-namespace:System;assembly=mscorlib" x:Key="Layout.ControlHeight">26</system:Double>
+    <!-- 胶囊单选横向内边距 -->
+    <Thickness x:Key="Layout.ChipPadding">12,0,12,0</Thickness>
 
     <!-- 滚动条：紧凑细轨（拇指可视 4px 两侧内收、无箭头），隐式样式全应用统一（主列表 / 动作面板 / 设置窗口列表） -->
     <Style TargetType="{x:Type ScrollBar}">

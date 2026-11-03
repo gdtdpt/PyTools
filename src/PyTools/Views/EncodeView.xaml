@@ -27,17 +27,17 @@
                                FontSize="{DynamicResource Font.Secondary}"
                                Foreground="{DynamicResource Text.Secondary}"/>
                     <RadioButton x:Name="FormatUrlRadio" GroupName="encFormat" Content="URL" Tag="url" IsChecked="True"
-                                 Margin="0,0,8,0" Checked="OnOptionChanged" Foreground="{DynamicResource Text.Primary}"/>
+                                 Margin="0,0,8,0" Checked="OnOptionChanged"/>
                     <RadioButton x:Name="FormatBase64Radio" GroupName="encFormat" Content="Base64" Tag="base64"
-                                 Margin="0,0,8,0" Checked="OnOptionChanged" Foreground="{DynamicResource Text.Primary}"/>
+                                 Margin="0,0,8,0" Checked="OnOptionChanged"/>
                     <RadioButton x:Name="FormatUnicodeRadio" GroupName="encFormat" Content="Unicode" Tag="unicode"
-                                 Margin="0,0,8,0" Checked="OnOptionChanged" Foreground="{DynamicResource Text.Primary}"/>
+                                 Margin="0,0,8,0" Checked="OnOptionChanged"/>
                     <RadioButton x:Name="FormatHtmlRadio" GroupName="encFormat" Content="HTML 实体" Tag="html"
-                                 Margin="0,0,8,0" Checked="OnOptionChanged" Foreground="{DynamicResource Text.Primary}"/>
+                                 Margin="0,0,8,0" Checked="OnOptionChanged"/>
                     <RadioButton x:Name="FormatJsonRadio" GroupName="encFormat" Content="JSON" Tag="json"
-                                 Margin="0,0,8,0" Checked="OnOptionChanged" Foreground="{DynamicResource Text.Primary}"/>
+                                 Margin="0,0,8,0" Checked="OnOptionChanged"/>
                     <RadioButton x:Name="FormatHexRadio" GroupName="encFormat" Content="Hex" Tag="hex"
-                                 Checked="OnOptionChanged" Foreground="{DynamicResource Text.Primary}"/>
+                                 Checked="OnOptionChanged"/>
                 </StackPanel>
 
                 <!-- 方向选择行 + 方向示例提示（v1 下拉的选项文案） -->
@@ -46,9 +46,9 @@
                                FontSize="{DynamicResource Font.Secondary}"
                                Foreground="{DynamicResource Text.Secondary}"/>
                     <RadioButton x:Name="DirectionEncodeRadio" GroupName="encDirection" Content="编码" Tag="encode" IsChecked="True"
-                                 Margin="0,0,8,0" Checked="OnOptionChanged" Foreground="{DynamicResource Text.Primary}"/>
+                                 Margin="0,0,8,0" Checked="OnOptionChanged"/>
                     <RadioButton x:Name="DirectionDecodeRadio" GroupName="encDirection" Content="解码" Tag="decode"
-                                 Margin="0,0,10,0" Checked="OnOptionChanged" Foreground="{DynamicResource Text.Primary}"/>
+                                 Margin="0,0,10,0" Checked="OnOptionChanged"/>
                     <TextBlock x:Name="DirectionHint" Text="" VerticalAlignment="Center"
                                FontSize="{DynamicResource Font.Secondary}"
                                Foreground="{DynamicResource Text.Placeholder}"/>
@@ -60,8 +60,6 @@
                          FontFamily="Consolas"
                          FontSize="{DynamicResource Font.Base}"
                          Foreground="{DynamicResource Text.Primary}"
-                         Background="{DynamicResource Bg.Input}"
-                         BorderBrush="{DynamicResource Border.Input}"
                          BorderThickness="1"
                          Padding="8,6"
                          AcceptsReturn="True"
@@ -79,8 +77,6 @@
                          FontFamily="Consolas"
                          FontSize="{DynamicResource Font.Base}"
                          Foreground="{DynamicResource Text.Primary}"
-                         Background="{DynamicResource Bg.Input}"
-                         BorderBrush="{DynamicResource Border.Input}"
                          BorderThickness="1"
                          Padding="8,6"
                          AcceptsReturn="True"

@@ -35,6 +35,7 @@
                              CaretBrush="{DynamicResource Text.Primary}"
                              Background="Transparent"
                              BorderThickness="0"
+                             Padding="0"
                              VerticalContentAlignment="Center"/>
                     <!-- 占位提示：输入非空即隐藏（主搜索框只属于主查询，动作过滤在面板内独立输入框） -->
                     <TextBlock x:Name="PART_Placeholder"

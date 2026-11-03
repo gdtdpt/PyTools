@@ -34,21 +34,21 @@
                     <TextBlock Grid.Column="0" Text="表达式" VerticalAlignment="Center" Margin="0,0,6,0"
                                FontSize="{DynamicResource Font.Secondary}"
                                Foreground="{DynamicResource Text.Secondary}"/>
+                    <!-- 表达式单行框：Padding 上下归零、水平 6 让文字贴左起头。
+                         TextBox 在 WPF 里没有 LineHeight（那是 TextBlock 的属性），光标高度只由字号和字体行距决定，
+                         14px Consolas 的行高只有 ~16.8px，在 30px 高的框里像一条短竖线 —— 这里提到 15px 撑高光标。 -->
                     <TextBox x:Name="ExprBox" Grid.Column="1"
                              Height="30"
                              FontFamily="Consolas"
-                             FontSize="{DynamicResource Font.Base}"
-                             Foreground="{DynamicResource Text.Primary}"
-                             Background="{DynamicResource Bg.Input}"
-                             BorderBrush="{DynamicResource Border.Input}"
+                             FontSize="15"
                              BorderThickness="1"
-                             Padding="8,5"
+                             Padding="6,0,6,0"
                              VerticalContentAlignment="Center"
                              SpellCheck.IsEnabled="False"
-                             TextChanged="OnExprChanged"
-                             CaretBrush="{DynamicResource Text.Primary}"/>
+                             TextChanged="OnExprChanged"/>
                     <Button x:Name="CopyButton" Grid.Column="2" Content="复制" Margin="8,0,0,0"
-                            Padding="12,0" Height="30" Click="OnCopyClick"/>
+                            Padding="12,0" Height="30" Click="OnCopyClick"
+                            Style="{StaticResource AccentButton}"/>
                 </Grid>
 
                 <!-- 状态行：左 = 解析状态；右 = 操作键帽 -->

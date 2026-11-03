@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using PyTools.Core;
@@ -108,7 +109,7 @@ namespace PyTools.Views
 
             var grid = new Grid();
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(66) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(78) }); // 「自定义」四字 + 新内边距不截断
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
             var name = new TextBlock
@@ -160,7 +161,8 @@ namespace PyTools.Views
                 var gridMax = def.Key == "week" ? 6 : def.Max; // 周 7 也是周日，点选网格与展示一致只出 0-6
                 for (var value = from; value <= gridMax; value++)
                 {
-                    var button = new Button
+                    // 切换块走 ToggleButton 隐式样式（选中 = 淡蓝底 + 蓝字，与胶囊单选同语义）
+                    var button = new ToggleButton
                     {
                         Content = def.Key == "week" ? WeekLabel(value) : value.ToString(),
                         Tag = value.ToString(CultureInfo.InvariantCulture),
@@ -169,12 +171,10 @@ namespace PyTools.Views
                         Margin = new Thickness(0, 0, 3, 3),
                         Padding = new Thickness(3, 0, 3, 0),
                         FontSize = 11,
-                        Cursor = Cursors.Hand,
                     };
                     var captured = row;
                     button.Click += delegate
                     {
-                        ToggleListButton(button);
                         SyncTextFromGrid(captured);
                         OnBuilderChanged();
                     };
@@ -250,8 +250,6 @@ namespace PyTools.Views
                 FontSize = 12,
                 FontFamily = new FontFamily("Consolas"),
                 Foreground = (Brush)FindResource("Text.Primary"),
-                Background = (Brush)FindResource("Bg.Input"),
-                BorderBrush = (Brush)FindResource("Border.Input"),
                 BorderThickness = new Thickness(1),
                 Padding = new Thickness(4, 2, 4, 2),
                 VerticalContentAlignment = VerticalAlignment.Center,
@@ -277,28 +275,6 @@ namespace PyTools.Views
                 VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(4, 0, 4, 0),
             };
-        }
-
-        private static void ToggleListButton(Button button)
-        {
-            var on = Equals(button.Background, FindResourceStatic("Bg.ItemSelected"));
-            if (on)
-            {
-                button.ClearValue(BackgroundProperty);
-                button.ClearValue(BorderBrushProperty);
-                button.ClearValue(ForegroundProperty);
-            }
-            else
-            {
-                button.SetResourceReference(BackgroundProperty, "Bg.ItemSelected");
-                button.SetResourceReference(BorderBrushProperty, "Accent");
-                button.SetResourceReference(ForegroundProperty, "Accent");
-            }
-        }
-
-        private static object FindResourceStatic(string key)
-        {
-            return Application.Current != null ? Application.Current.TryFindResource(key) : null;
         }
 
         private void ShowParam(FieldRow row)
@@ -380,11 +356,10 @@ namespace PyTools.Views
             if (row.GridButtons == null) return;
             var values = new HashSet<string>();
             foreach (var item in row.ListText.Text.Split(',')) values.Add(item.Trim());
-            foreach (Button button in row.GridButtons.Children)
+            foreach (ToggleButton button in row.GridButtons.Children)
             {
                 var on = values.Contains((string)button.Tag);
-                var current = Equals(button.Background, FindResourceStatic("Bg.ItemSelected"));
-                if (on != current) ToggleListButton(button);
+                if (on != (button.IsChecked == true)) button.IsChecked = on;
             }
         }
 
@@ -392,8 +367,8 @@ namespace PyTools.Views
         {
             if (row.GridButtons == null) return;
             var values = new List<string>();
-            foreach (Button button in row.GridButtons.Children)
-                if (Equals(button.Background, FindResourceStatic("Bg.ItemSelected")))
+            foreach (ToggleButton button in row.GridButtons.Children)
+                if (button.IsChecked == true)
                     values.Add((string)button.Tag);
             SetTextIfNotFocused(row.ListText, string.Join(",", values));
         }

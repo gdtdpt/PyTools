@@ -281,6 +281,11 @@ namespace PyTools
                     Source = new Uri("pack://application:,,,/Themes/Theme.Lite.xaml")
                 });
             }
+            // 控件隐式样式库：必须后挂，且与简洁模式无关（控件圆角两形态一致）
+            Resources.MergedDictionaries.Add(new ResourceDictionary
+            {
+                Source = new Uri("pack://application:,,,/Themes/Controls.xaml")
+            });
         }
 
         // ---- 热键 ----

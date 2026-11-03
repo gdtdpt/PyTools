@@ -32,6 +32,7 @@
                              CaretBrush="{DynamicResource Text.Primary}"
                              Background="Transparent"
                              BorderThickness="0"
+                             Padding="0"
                              VerticalContentAlignment="Center"/>
                     <TextBlock x:Name="PART_Placeholder"
                                Text="搜索剪贴板记录…"

@@ -23,50 +23,34 @@
 
             <!-- 操作按钮行 -->
             <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
-                <Button x:Name="FormatClipboardButton" Content="格式化剪贴板" Padding="10,4" Click="OnFormatClipboard"
-                        Background="{DynamicResource Bg.Input}"
-                        Foreground="{DynamicResource Text.Primary}"
+                <Button x:Name="FormatClipboardButton" Content="格式化剪贴板" Click="OnFormatClipboard"
                         ToolTip="读取剪贴板，自动识别 JSON/XML 格式化后写回"/>
-                <Button x:Name="FormatInputButton" Content="格式化输入" Margin="6,0,0,0" Padding="10,4" Click="OnFormatInput"
-                        Background="{DynamicResource Bg.Input}"
-                        Foreground="{DynamicResource Text.Primary}"/>
-                <Button x:Name="MinifyButton" Content="压缩" Margin="6,0,0,0" Padding="10,4" Click="OnMinify"
-                        Background="{DynamicResource Bg.Input}"
-                        Foreground="{DynamicResource Text.Primary}"/>
-                <Button x:Name="CopyButton" Content="复制结果" Margin="6,0,0,0" Padding="10,4" Click="OnCopy"
-                        Background="{DynamicResource Bg.Input}"
-                        Foreground="{DynamicResource Text.Primary}"/>
-                <Button x:Name="UndoButton" Content="撤销" Margin="6,0,0,0" Padding="10,4" Click="OnUndo" IsEnabled="False"
-                        Background="{DynamicResource Bg.Input}"
-                        Foreground="{DynamicResource Text.Primary}"
+                <Button x:Name="FormatInputButton" Content="格式化输入" Margin="6,0,0,0" Click="OnFormatInput"/>
+                <Button x:Name="MinifyButton" Content="压缩" Margin="6,0,0,0" Click="OnMinify"/>
+                <Button x:Name="CopyButton" Content="复制结果" Margin="6,0,0,0" Click="OnCopy"/>
+                <Button x:Name="UndoButton" Content="撤销" Margin="6,0,0,0" Click="OnUndo" IsEnabled="False"
                         ToolTip="恢复上次处理前的内容"/>
             </StackPanel>
 
-            <!-- 选项行：格式 + 缩进 -->
+            <!-- 选项行：格式 + 缩进（控件外观由 Themes/Controls.xaml 隐式样式统一） -->
             <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,8">
                 <TextBlock Text="格式" VerticalAlignment="Center" Margin="0,0,6,0"
                            FontSize="{DynamicResource Font.Secondary}"
                            Foreground="{DynamicResource Text.Secondary}"/>
                 <RadioButton x:Name="FormatAutoRadio" GroupName="fmtFormat" Content="自动" IsChecked="True"
-                             Margin="0,0,8,0" Checked="OnOptionChanged"
-                             Foreground="{DynamicResource Text.Primary}"/>
+                             Margin="0,0,8,0" Checked="OnOptionChanged"/>
                 <RadioButton x:Name="FormatJsonRadio" GroupName="fmtFormat" Content="JSON"
-                             Margin="0,0,8,0" Checked="OnOptionChanged"
-                             Foreground="{DynamicResource Text.Primary}"/>
+                             Margin="0,0,8,0" Checked="OnOptionChanged"/>
                 <RadioButton x:Name="FormatXmlRadio" GroupName="fmtFormat" Content="XML"
-                             Margin="0,0,14,0" Checked="OnOptionChanged"
-                             Foreground="{DynamicResource Text.Primary}"/>
+                             Margin="0,0,14,0" Checked="OnOptionChanged"/>
                 <TextBlock Text="缩进" VerticalAlignment="Center" Margin="0,0,6,0"
                            FontSize="{DynamicResource Font.Secondary}"
                            Foreground="{DynamicResource Text.Secondary}"/>
                 <RadioButton x:Name="Indent2Radio" GroupName="fmtIndent" Content="2 空格" IsChecked="True"
-                             Margin="0,0,8,0"
-                             Foreground="{DynamicResource Text.Primary}"/>
+                             Margin="0,0,8,0"/>
                 <RadioButton x:Name="Indent4Radio" GroupName="fmtIndent" Content="4 空格"
-                             Margin="0,0,8,0"
-                             Foreground="{DynamicResource Text.Primary}"/>
-                <RadioButton x:Name="IndentTabRadio" GroupName="fmtIndent" Content="Tab"
-                             Foreground="{DynamicResource Text.Primary}"/>
+                             Margin="0,0,8,0"/>
+                <RadioButton x:Name="IndentTabRadio" GroupName="fmtIndent" Content="Tab"/>
             </StackPanel>
 
             <!-- 等宽编辑区 -->
@@ -75,8 +59,6 @@
                      FontFamily="Consolas"
                      FontSize="{DynamicResource Font.Base}"
                      Foreground="{DynamicResource Text.Primary}"
-                     Background="{DynamicResource Bg.Input}"
-                     BorderBrush="{DynamicResource Border.Input}"
                      BorderThickness="1"
                      Padding="8,6"
                      AcceptsReturn="True"
