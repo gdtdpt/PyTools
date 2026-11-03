@@ -673,6 +673,128 @@ namespace PyTools.Core
                 return null;
             }));
 
+            // ---- Cron 表达式（M4，cron-core.js 移植）----
+
+            results.Add(Test("Cron：六段/五段解析与摘要", () =>
+            {
+                var six = CronExpr.Parse("0 0 1,5 15,30 * *");
+                if (!six.Ok) return "六段解析失败: " + six.Error.Message;
+                if (!six.Summary.Contains("每月")) return "摘要不符: " + six.Summary;
+                if (six.OrRule) return "日限周不限不应触发或规则";
+                var five = CronExpr.Parse("30 4 * * *");
+                if (!five.Ok) return "五段解析失败: " + five.Error.Message;
+                if (five.Note == null || !five.Note.Contains("5 段")) return "五段说明缺失: " + five.Note;
+                if (five.Fields[0].Values[0] != 0) return "五段秒应为固定 0";
+                return null;
+            }));
+
+            results.Add(Test("Cron：宏与 @reboot、非法宏报错", () =>
+            {
+                var daily = CronExpr.Parse("@daily");
+                if (!daily.Ok || daily.Note == null || !daily.Note.Contains("等价于")) return "@daily 说明缺失";
+                var reboot = CronExpr.Parse("@reboot");
+                if (!reboot.Ok || reboot.Fields != null) return "@reboot 应 ok 且无字段";
+                var bad = CronExpr.Parse("@weeklyly");
+                if (bad.Ok || bad.Error.Message.IndexOf("不支持的宏", StringComparison.Ordinal) < 0) return "非法宏未报错";
+                return null;
+            }));
+
+            results.Add(Test("Cron：字段错误定位与段数错误", () =>
+            {
+                var badHour = CronExpr.Parse("0 0 99 * * *");
+                if (badHour.Ok || badHour.Error.FieldKey != "hour") return "小时段错误未定位: "
+                    + (badHour.Error != null ? badHour.Error.FieldKey : "null");
+                var badCount = CronExpr.Parse("0 0 0 * * * *");
+                if (badCount.Ok || badCount.Error.FieldKey != null) return "段数错误应无字段定位";
+                if (badCount.Error.Message.IndexOf("段数不对", StringComparison.Ordinal) < 0) return "段数文案不符";
+                return null;
+            }));
+
+            results.Add(Test("Cron：触发时间推算（六段固定起点）", () =>
+            {
+                var from = new DateTime(2026, 11, 3, 10, 0, 0);
+                var result = CronExpr.NextRuns("0 0 1,5 15,30 * *", 5, from);
+                if (!result.Ok) return "推算失败: " + result.Error.Message;
+                if (result.Runs.Count < 4) return "推算条数不足: " + result.Runs.Count;
+                if (result.Runs[0] != new DateTime(2026, 11, 15, 1, 0, 0)) return "第一次触发不符: " + result.Runs[0];
+                // 小时段为 {1,5}：同一天 05:00 也是合法触发，再轮到 30 日
+                if (result.Runs[1] != new DateTime(2026, 11, 15, 5, 0, 0)) return "第二次触发不符: " + result.Runs[1];
+                if (result.Runs[2] != new DateTime(2026, 11, 30, 1, 0, 0)) return "第三次触发不符: " + result.Runs[2];
+                if (result.Runs[3] != new DateTime(2026, 11, 30, 5, 0, 0)) return "第四次触发不符: " + result.Runs[3];
+                if (result.Truncated) return "不应截断";
+                return null;
+            }));
+
+            results.Add(Test("Cron：月末跳过与永不触发截断", () =>
+            {
+                var from = new DateTime(2026, 11, 3, 10, 0, 0);
+                var month31 = CronExpr.NextRuns("0 0 0 31 * *", 5, from);
+                if (!month31.Ok || month31.Runs.Count == 0) return "31 日推算失败";
+                if (month31.Runs[0] != new DateTime(2026, 12, 31, 0, 0, 0)) return "11 月无 31 日应跳到 12 月: " + month31.Runs[0];
+                var feb30 = CronExpr.NextRuns("0 0 0 30 2 *", 5, from);
+                if (!feb30.Ok || feb30.Runs.Count != 0) return "2 月 30 日应有零次触发";
+                if (feb30.Note == null || feb30.Note.IndexOf("不会触发", StringComparison.Ordinal) < 0) return "永不触发说明缺失";
+                return null;
+            }));
+
+            results.Add(Test("Cron：日+周「或」规则匹配", () =>
+            {
+                var from = new DateTime(2026, 11, 3, 10, 0, 0); // 周二
+                var result = CronExpr.NextRuns("0 0 0 1 * 1", 5, from); // 每月 1 日 或 周一
+                if (!result.Ok) return "推算失败: " + result.Error.Message;
+                if (result.Runs[0] != new DateTime(2026, 11, 9, 0, 0, 0)) return "下一个周一不符: " + result.Runs[0];
+                foreach (var run in result.Runs)
+                    if (run.Day != 1 && run.DayOfWeek != DayOfWeek.Monday) return "命中非或条件日期: " + run;
+                return null;
+            }));
+
+            results.Add(Test("Cron：构造器状态往返（every/list/range/custom）", () =>
+            {
+                // every
+                var every = CronExpr.Parse("*/5 * * * * *");
+                var everyState = CronExpr.FieldToBuilder(every.Fields[0]);
+                if (CronExpr.BuildField("second", everyState) != "*/5") return "every 往返不符";
+                // list
+                var list = CronExpr.Parse("0 1,3,5 * * * *");
+                var listState = CronExpr.FieldToBuilder(list.Fields[1]);
+                if (listState.Mode != "list" || CronExpr.BuildField("minute", listState) != "1,3,5") return "list 往返不符";
+                // range
+                var range = CronExpr.Parse("0 0 9-17/2 * * *");
+                var rangeState = CronExpr.FieldToBuilder(range.Fields[2]);
+                if (rangeState.Mode != "range" || CronExpr.BuildField("hour", rangeState) != "9-17/2") return "range 往返不符";
+                // custom（混合段）
+                var custom = CronExpr.Parse("0 0 0 1,3-5 * *");
+                var customState = CronExpr.FieldToBuilder(custom.Fields[3]);
+                if (customState.Mode != "custom" || CronExpr.BuildField("day", customState) != "1,3-5") return "custom 往返不符";
+                // 通配
+                var wild = CronExpr.Parse("0 0 0 * * *");
+                var wildState = CronExpr.FieldToBuilder(wild.Fields[5]);
+                if (wildState.Mode != "every" || wildState.Step.Length != 0) return "通配应还原为空 every";
+                return null;
+            }));
+
+            results.Add(Test("Cron：BuildField 参数校验报错", () =>
+            {
+                try { CronExpr.BuildField("minute", new CronBuilderState { Mode = "every", Step = "0" }); return "步进 0 未报错"; }
+                catch (CronException) { }
+                try { CronExpr.BuildField("minute", new CronBuilderState { Mode = "list", Values = new List<string>() }); return "空列表未报错"; }
+                catch (CronException) { }
+                try { CronExpr.BuildField("hour", new CronBuilderState { Mode = "range", From = "20", To = "8" }); return "起点大于终点未报错"; }
+                catch (CronException) { }
+                try { CronExpr.BuildField("day", new CronBuilderState { Mode = "list", Values = new List<string> { "abc" } }); return "非整数未报错"; }
+                catch (CronException) { }
+                return null;
+            }));
+
+            results.Add(Test("内置命令：cron 唤醒词命中", () =>
+            {
+                var hit = BuiltinCommands.Match("cron");
+                if (hit == null || !hit.IsCommand || hit.CommandId != "cron") return "cron 未命中";
+                var partial = BuiltinCommands.Match("cro");
+                if (partial == null || partial.CommandId != "cron") return "前缀未命中";
+                return null;
+            }));
+
             var failed = 0;
             var lines = new List<string>();
             foreach (var r in results)

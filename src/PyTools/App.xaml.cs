@@ -33,6 +33,7 @@ namespace PyTools
         private VscProjectView _vscView;
         private FormatView _formatView;
         private EncodeView _encodeView;
+        private CronView _cronView;
         private ClipboardHistory _clipHistory;
         private ClipboardWatcher _clipWatcher;
         private bool _clipboardRegistered;
@@ -47,6 +48,12 @@ namespace PyTools
         private bool _capturedForeground; // 呼出前已记录前台
         private IntPtr _capturedTarget = IntPtr.Zero;
         private SynchronizationContext _uiContext;
+
+        // ---- 工具固定尺寸模式（M4，cron 首用；参照 v1 window-manager 的 setToolWindow/resetToolWindow）----
+        private bool _toolSizeMode;        // 当前处于工具固定尺寸模式
+        private Rect _toolRestoreBounds;   // 进入模式前的窗口 bounds（还原点）
+        private static readonly DependencyProperty[] BoundsProps =
+            { Window.LeftProperty, Window.TopProperty, Window.WidthProperty, Window.HeightProperty };
 
         public static string AppDirectory
         {
@@ -142,6 +149,10 @@ namespace PyTools
                 _encodeView = new EncodeView { Config = _config };
                 if (_view != null) _encodeView.Margin = _view.Margin;
 
+                // Cron 表达式视图（M4）：首个使用「工具固定尺寸模式」的视图（进入时窗口动画放大，见 ApplyToolSizeMode）
+                _cronView = new CronView();
+                if (_view != null) _cronView.Margin = _view.Margin;
+
                 _clipWatcher = new ClipboardWatcher(OnClipboardUpdate);
                 if (!_clipWatcher.Start()) Logger.Error("clipboard watcher failed to start");
 
@@ -176,6 +187,12 @@ namespace PyTools
                     if (ReferenceEquals(content, _encodeView))
                     {
                         if (_encodeView.TryExitActionMode()) return;
+                        ShowSummon();
+                        return;
+                    }
+                    if (ReferenceEquals(content, _cronView))
+                    {
+                        if (_cronView.TryExitActionMode()) return;
                         ShowSummon();
                         return;
                     }
@@ -223,14 +240,16 @@ namespace PyTools
                     else if (args.Contains("--vsc")) ShowVsc();
                     else if (args.Contains("--format")) ShowFormat();
                     else if (args.Contains("--encode")) ShowEncode();
+                    else if (args.Contains("--cron")) ShowCron();
                     else ShowSummon();
                     if (_debugQuery != null)
                     {
                         // --query 配套当前视图：截图自验用
-                        if (args.Contains("--clipboard")) _clipView.SearchBox.Text = _debugQuery;
-                        else if (args.Contains("--vsc")) _vscView.SearchBox.Text = _debugQuery;
-                        else if (args.Contains("--format")) { /* 编辑区无查询语义 */ }
-                        else _view.SearchBox.Text = _debugQuery;
+                    if (args.Contains("--clipboard")) _clipView.SearchBox.Text = _debugQuery;
+                    else if (args.Contains("--vsc")) _vscView.SearchBox.Text = _debugQuery;
+                    else if (args.Contains("--format")) { /* 编辑区无查询语义 */ }
+                    else if (args.Contains("--cron")) _cronView.ExprBox.Text = _debugQuery;
+                    else _view.SearchBox.Text = _debugQuery;
                     }
                 }
                 else if (_bootAddApp != null)
@@ -365,6 +384,12 @@ namespace PyTools
             ShowShell(_encodeView, _encodeView.ResetForEncode, "encode");
         }
 
+        /// <summary>Cron 表达式视图（M4）：由启动器内置命令条目进入；固定尺寸模式（窗口动画放大到 760×560）。</summary>
+        private void ShowCron()
+        {
+            ShowShell(_cronView, _cronView.ResetForCron, "cron", new Size(760, 560));
+        }
+
         private void ShowClipboard()
         {
             ShowClipboard(fromLauncher: false);
@@ -379,8 +404,14 @@ namespace PyTools
         /// <summary>
         /// 呼出壳统一入口：切换内容视图 → （首次显示时）记录前台、定位、显示、淡入。
         /// 两个视图共用同一份 windowBounds，所以切换视图时位置不变，只变高度（顶边锚定）。
+        /// toolFixedSize 非空 = 工具固定尺寸模式（如 cron 的 760×560）：窗口带过渡动画放大，退出时还原。
         /// </summary>
         private void ShowShell(object content, Action reset, string tag)
+        {
+            ShowShell(content, reset, tag, null);
+        }
+
+        private void ShowShell(object content, Action reset, string tag, Size? toolFixedSize)
         {
             if (_window == null || _hiding) return;
             var sw = Stopwatch.StartNew();
@@ -396,13 +427,21 @@ namespace PyTools
                 _hiding = false;
             }
 
+            // 尺寸模式：进入在内容切换前（冻结当前高度，避免 SizeToContent 瞬跳）；
+            // 退出在内容切换后（还原高度按新内容自然尺寸实测）
+            var wasToolMode = _toolSizeMode;
+            if (toolFixedSize.HasValue) EnterToolSizeMode(toolFixedSize.Value, alreadyVisible);
+
             _window.Content = content;
             // 切视图前统一收动作面板：面板是独立 Popup HWND，不随 Content 切换而消失（与 HideSummon 同理）
             _view.ExitActionMode();
             _vscView.ExitActionMode();
             _formatView.ExitActionMode();
             _encodeView.ExitActionMode();
+            _cronView.ExitActionMode();
             reset();
+
+            if (wasToolMode && !toolFixedSize.HasValue) ExitToolSizeMode(content, alreadyVisible);
 
             if (!alreadyVisible)
             {
@@ -435,6 +474,143 @@ namespace PyTools
             Logger.Info("summon show [" + tag + "] elapsed=" + sw.ElapsedMilliseconds + "ms");
         }
 
+        // ---- 工具固定尺寸模式（v1 setToolWindow 同语义：还原点 + 三次缓出插值 + 防重入）----
+
+        /// <summary>
+        /// 进入工具固定尺寸模式：记还原点 → SizeToContent 切 Manual → 冻结当前高度 →
+        /// 动画到目标尺寸（窗口中心锚定，钳制在虚拟屏内）。冷启动直呼无动画，直接按目标尺寸显示。
+        /// 必须先于 Content 切换调用（否则 SizeToContent 高度瞬跳、动画形同虚设）。
+        /// </summary>
+        private void EnterToolSizeMode(Size target, bool windowVisible)
+        {
+            if (_toolSizeMode) return; // 已在模式内（cron 重入）：维持现状
+            _toolSizeMode = true;
+            _toolRestoreBounds = CaptureRestoreBounds(windowVisible);
+            _window.SizeToContent = SizeToContent.Manual;
+            if (!windowVisible)
+            {
+                // 冷启动：无动画直接放大；位置交给 EnsureOnScreen（这里只钳制尺寸到虚拟屏）
+                _window.Width = Math.Min(target.Width, SystemParameters.VirtualScreenWidth);
+                _window.Height = Math.Min(target.Height, SystemParameters.VirtualScreenHeight);
+                _window.MinHeight = _window.Height; // 无动画路径没有完成回调，直接钉住（防内容挂载竞态把高度压回自然高）
+                return;
+            }
+            _window.Height = _window.ActualHeight; // 冻结当前高度，内容切换不再瞬跳
+            AnimateWindowBounds(TargetRectFor(target), GetTokenDouble("Motion.ToolResizeMs"));
+        }
+
+        /// <summary>
+        /// 退出工具固定尺寸模式：动画还原到进入前的 bounds。必须在 Content 切换之后调用——
+        /// 还原高度按新内容自然尺寸实测（还原点高度在冷启动路径是估计值，列表/工具视图高度走 SizeToContent）。
+        /// </summary>
+        private void ExitToolSizeMode(object newContent, bool windowVisible)
+        {
+            if (!_toolSizeMode) return;
+            if (!windowVisible) { SnapRestoreBounds(); return; }
+            _toolSizeMode = false; // 动画完成后回调据此恢复 SizeToContent（此前漏复位 → 高度被冻结在实测值，列表再变也撑不开窗口）
+            _window.MinHeight = 0; // 先撤防线再动画：MinHeight 不撤会把收缩动画钳在工具尺寸上
+            var target = _toolRestoreBounds;
+            var fe = newContent as FrameworkElement;
+            if (fe != null)
+            {
+                fe.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                if (fe.DesiredSize.Height > 0) target.Height = fe.DesiredSize.Height; // 含 Margin
+            }
+            AnimateWindowBounds(target, GetTokenDouble("Motion.ToolResizeMs"));
+        }
+
+        /// <summary>还原点捕获：窗口已显示用实值；未显示时 Left/Top 为 NaN（实测踩过：NaN 进 BeginAnimation 直接 ArgumentException），
+        /// 按 config + EnsureOnScreen 同口径取默认列表位。</summary>
+        private Rect CaptureRestoreBounds(bool windowVisible)
+        {
+            var width = _window.ActualWidth;
+            if (windowVisible && !double.IsNaN(_window.Left) && !double.IsNaN(_window.Top) && width > 0)
+                return new Rect(_window.Left, _window.Top, width, _window.ActualHeight);
+
+            width = _config.BoundsWidth;
+            if (double.IsNaN(width) || width <= 0) width = 640;
+            var left = _config.BoundsX;
+            var virtualLeft = SystemParameters.VirtualScreenLeft;
+            var virtualTop = SystemParameters.VirtualScreenTop;
+            if (double.IsNaN(left) || left < virtualLeft - 8 || left > virtualLeft + SystemParameters.VirtualScreenWidth - 80)
+                left = (SystemParameters.WorkArea.Width - width) / 2 + virtualLeft;
+            var top = _config.BoundsY;
+            if (double.IsNaN(top) || top < virtualTop - 8 || top > virtualTop + SystemParameters.VirtualScreenHeight - 80)
+                top = SystemParameters.WorkArea.Height / 3 + virtualTop;
+            return new Rect(left, top, width, 420); // 高度是过渡估计值，退出动画完成后 SizeToContent 接管
+        }
+
+        /// <summary>目标 rect：以窗口当前中心为锚伸缩，钳制在虚拟屏内（v1 是跳到工作区居中，v2 保持用户记忆位附近）。</summary>
+        private Rect TargetRectFor(Size target)
+        {
+            var left = SystemParameters.VirtualScreenLeft;
+            var top = SystemParameters.VirtualScreenTop;
+            var width = Math.Min(target.Width, SystemParameters.VirtualScreenWidth);
+            var height = Math.Min(target.Height, SystemParameters.VirtualScreenHeight);
+            var cx = _window.Left + _window.ActualWidth / 2;
+            var cy = _window.Top + _window.ActualHeight / 2;
+            var x = Math.Max(left, Math.Min(cx - width / 2, left + SystemParameters.VirtualScreenWidth - width));
+            var y = Math.Max(top, Math.Min(cy - height / 2, top + SystemParameters.VirtualScreenHeight - height));
+            return new Rect(x, y, width, height);
+        }
+
+        /// <summary>四轴 180ms 三次缓出插值（v1 同参数：1-(1-p)³），全部完成后回调。</summary>
+        private void AnimateWindowBounds(Rect to, double ms)
+        {
+            if (ms <= 0) ms = 180;
+            var from = new[] { _window.Left, _window.Top, _window.ActualWidth, _window.ActualHeight };
+            var targets = new[] { to.Left, to.Top, to.Width, to.Height };
+            for (var i = 0; i < BoundsProps.Length; i++)
+                if (double.IsNaN(from[i]) || double.IsNaN(targets[i]))
+                {
+                    Logger.Error("animate bounds has NaN, abort (index=" + i + ")"); // 防御：NaN 直传 BeginAnimation 会崩进程
+                    SnapRestoreBounds();
+                    return;
+                }
+            var duration = TimeSpan.FromMilliseconds(ms);
+            var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+            var remaining = BoundsProps.Length;
+            for (var i = 0; i < BoundsProps.Length; i++)
+            {
+                var prop = BoundsProps[i];
+                var anim = new DoubleAnimation(from[i], targets[i], duration) { EasingFunction = ease };
+                anim.Completed += (sender, eventArgs) =>
+                {
+                    if (--remaining == 0)
+                    {
+                        if (_toolSizeMode)
+                        {
+                            // 进入动画落定：Win32 级钉住目标高（MinHeight 经 WM_GETMINMAXINFO 钳制一切 SetWindowPos）。
+                            // 实测 SizeToContent 切 Manual 后内容首次挂载仍可能异步把窗口压回内容自然高（竞态，
+                            // 藏窗→再呼出循环下约半数触发），托管层显式 Height 都拦不住，只有 MinHeight 拦得住。
+                            // 不能在动画开始就设：会钳掉中间帧，增长动画直接跳变。
+                            _window.MinHeight = to.Height;
+                        }
+                        else
+                        {
+                            // 退出动画结束：恢复内容自适应高度（列表/工具视图的高度仍走 SizeToContent）
+                            _window.SizeToContent = SizeToContent.Height;
+                            _window.Height = double.NaN;
+                        }
+                    }
+                };
+                _window.BeginAnimation(prop, anim);
+            }
+        }
+
+        /// <summary>瞬间还原（无动画）：藏窗或窗口不可见时使用，保证位置记忆不被放大尺寸污染。</summary>
+        private void SnapRestoreBounds()
+        {
+            foreach (var prop in BoundsProps) _window.BeginAnimation(prop, null);
+            _window.MinHeight = 0; // 撤掉工具尺寸防线，否则启动器高度被钉死
+            _window.Left = _toolRestoreBounds.Left;
+            _window.Top = _toolRestoreBounds.Top;
+            _window.Width = _toolRestoreBounds.Width;
+            _window.SizeToContent = SizeToContent.Height;
+            _window.Height = double.NaN;
+            _toolSizeMode = false;
+        }
+
         private void HideSummon()
         {
             if (_window == null || _hiding || !_window.IsVisible) return;
@@ -446,9 +622,15 @@ namespace PyTools
             _vscView.ExitActionMode();
             _formatView.ExitActionMode();
             _encodeView.ExitActionMode();
+            _cronView.ExitActionMode();
 
-            // 位置记忆（沿用 v1 的 windowBounds 键）
-            _config.SaveBounds(_window.Left, _window.Top, _window.Width, _window.Height);
+            // 工具尺寸模式下藏窗：不当场还原（760×560 瞬缩 640×420 的跳变会被看见）——
+            // 保持原样淡出，Hide 之后再瞬间还原（CompleteHide）；落盘直接用还原点
+            if (_toolSizeMode)
+                _config.SaveBounds(_toolRestoreBounds.Left, _toolRestoreBounds.Top, _toolRestoreBounds.Width, _toolRestoreBounds.Height);
+            else
+                // 位置记忆（沿用 v1 的 windowBounds 键）
+                _config.SaveBounds(_window.Left, _window.Top, _window.Width, _window.Height);
 
             var ms = GetTokenDouble("Motion.HideMs");
             if (ms > 0)
@@ -467,6 +649,8 @@ namespace PyTools
             _window.BeginAnimation(UIElement.OpacityProperty, null);
             _window.Opacity = 1;
             _window.Hide();
+            // 窗口已不可见，此刻瞬间还原尺寸模式（用户看不到缩放）
+            if (_toolSizeMode) SnapRestoreBounds();
             _hiding = false;
 
             // 焦点恢复（验证 + 重试 + 全程打点）
@@ -670,6 +854,7 @@ namespace PyTools
                 else if (string.Equals(entry.CommandId, "clipboard", StringComparison.OrdinalIgnoreCase)) ShowClipboard(fromLauncher: true);
                 else if (string.Equals(entry.CommandId, "format", StringComparison.OrdinalIgnoreCase)) ShowFormat();
                 else if (string.Equals(entry.CommandId, "encode", StringComparison.OrdinalIgnoreCase)) ShowEncode();
+                else if (string.Equals(entry.CommandId, "cron", StringComparison.OrdinalIgnoreCase)) ShowCron();
                 else if (string.Equals(entry.CommandId, "format-clipboard", StringComparison.OrdinalIgnoreCase)) RunFormatClipboardAction();
                 return;
             }
@@ -895,7 +1080,10 @@ namespace PyTools
                 if (_hotkeySource != null) _hotkeySource.Dispose();
                 if (_clipWatcher != null) _clipWatcher.Dispose();
                 if (_window != null && _window.IsVisible)
+                {
+                    if (_toolSizeMode) SnapRestoreBounds(); // 工具尺寸模式：退出前还原，位置记忆不被污染
                     _config.SaveBounds(_window.Left, _window.Top, _window.Width, _window.Height);
+                }
                 if (_tray != null) _tray.Dispose();
                 if (_single != null) _single.Dispose();
                 Logger.Info("exit");

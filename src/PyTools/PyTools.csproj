@@ -81,6 +81,10 @@
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>
+    <Page Include="Views\CronView.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
     <Page Include="Windows\SummonWindow.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
@@ -122,6 +126,7 @@
     <Compile Include="Core\BuiltinCommands.cs" />
     <Compile Include="Core\StructuredFormats.cs" />
     <Compile Include="Core\TextEncoders.cs" />
+    <Compile Include="Core\CronExpr.cs" />
     <Compile Include="Native\NativeMethods.cs" />
     <Compile Include="Native\HotkeyParser.cs" />
     <Compile Include="Native\Foreground.cs" />
@@ -158,6 +163,10 @@
     </Compile>
     <Compile Include="Views\EncodeView.xaml.cs">
       <DependentUpon>EncodeView.xaml</DependentUpon>
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="Views\CronView.xaml.cs">
+      <DependentUpon>CronView.xaml</DependentUpon>
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="Views\ClipboardView.xaml.cs">

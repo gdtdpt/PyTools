@@ -59,6 +59,14 @@ namespace PyTools.Core
             },
             new BuiltinCommand
             {
+                Id = "cron",
+                Kind = "view",
+                Title = "Cron 表达式",
+                Subtitle = "构造解析与最近触发时间推算",
+                Aliases = new[] { "cron" } // 无中文别名：「定时」「计划」太泛，留给以后真正的定时任务工具
+            },
+            new BuiltinCommand
+            {
                 Id = "format-clipboard",
                 Kind = "action",
                 Title = "格式化剪贴板",

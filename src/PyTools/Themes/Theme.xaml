@@ -36,6 +36,8 @@
     <!-- 动效（毫秒；简洁模式覆盖为 0 = 直切） -->
     <system:Double xmlns:system="clr-namespace:System;assembly=mscorlib" x:Key="Motion.SummonMs">130</system:Double>
     <system:Double xmlns:system="clr-namespace:System;assembly=mscorlib" x:Key="Motion.HideMs">100</system:Double>
+    <!-- 工具固定尺寸模式的窗口尺寸过渡（cron 首用）；参数与 v1 animateBounds 一致 -->
+    <system:Double xmlns:system="clr-namespace:System;assembly=mscorlib" x:Key="Motion.ToolResizeMs">180</system:Double>
 
     <!-- 布局 -->
     <system:Double xmlns:system="clr-namespace:System;assembly=mscorlib" x:Key="Layout.SearchBoxHeight">42</system:Double>
