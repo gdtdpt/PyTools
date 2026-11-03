@@ -193,6 +193,32 @@ namespace PyTools.Core
             sb.Append('"');
         }
 
+        // ---- 供编码转换（EncodeView）使用的 JSON 字面量方向（语义对照 v1 encoding-converter）----
+
+        /// <summary>标准 JSON → JSON 字符串字面量（v1: JSON.stringify(JSON.stringify(p))，仅接受对象/数组）。</summary>
+        public static string JsonEncodeLiteral(string text)
+        {
+            var value = ParseJson(NormalizeText(text));
+            if (!(value is JsonObject) && !(value is List<object>)) throw new FormatException("仅支持 JSON 对象或数组");
+            var compact = new StringBuilder();
+            WriteJsonValue(compact, value, "", 0, pretty: false);
+            var literal = new StringBuilder();
+            WriteJsonString(literal, compact.ToString());
+            return literal.ToString();
+        }
+
+        /// <summary>JSON 字符串字面量 → 标准 JSON（字符串：解开内容再 2 空格美化；对象/数组：直接美化；其余类型报错）。</summary>
+        public static string JsonDecodeLiteral(string text)
+        {
+            var value = ParseJson(NormalizeText(text));
+            var inner = value as string;
+            if (inner != null) value = ParseJson(inner);
+            else if (!(value is JsonObject) && !(value is List<object>)) throw new FormatException("仅支持字符串、对象或数组");
+            var sb = new StringBuilder();
+            WriteJsonValue(sb, value, "  ", 0, pretty: true);
+            return sb.ToString();
+        }
+
         private static string CompactMessage(string message)
         {
             return string.Join(" ", (message ?? "").Split((char[])null, StringSplitOptions.RemoveEmptyEntries));

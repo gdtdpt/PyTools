@@ -27,6 +27,8 @@ namespace PyTools.Core
         public bool PinyinSearch = true;   // 拼音首字母搜索（M2a，L7）
         public int PageStep = 5;           // Ctrl+N/P 步进条数（M2a，L6）
         public bool ClipboardPrivacyFilter = true; // 剪贴板隐私格式过滤（M3）
+        public string EncodeFormat = "url";        // 编码转换记住上次格式（M4，2026-11-02 用户拍板）
+        public string EncodeDirection = "encode";  // 编码转换记住上次方向（M4）
 
         private readonly string _path;
         private Dictionary<string, object> _raw = new Dictionary<string, object>();
@@ -64,6 +66,8 @@ namespace PyTools.Core
             PageStep = (int)GetNumber(_raw, "v2.pageStep", PageStep);
             if (PageStep < 1) PageStep = 1;
             ClipboardPrivacyFilter = GetBool("v2.clipboardPrivacyFilter", ClipboardPrivacyFilter);
+            EncodeFormat = GetString("v2.encodeFormat", EncodeFormat);
+            EncodeDirection = GetString("v2.encodeDirection", EncodeDirection);
 
             var bounds = _raw.ContainsKey("windowBounds") ? _raw["windowBounds"] as Dictionary<string, object> : null;
             if (bounds != null)
@@ -105,6 +109,18 @@ namespace PyTools.Core
             catch (Exception ex) { Logger.Error("save liteMode failed: " + ex.Message); }
         }
 
+        /// <summary>编码转换记住上次格式/方向（EncodeView 选项变更时调用，M4）。</summary>
+        public void SaveEncodeChoice(string format, string direction)
+        {
+            if (format != EncodeFormat || direction != EncodeDirection)
+            {
+                EncodeFormat = format;
+                EncodeDirection = direction;
+            }
+            try { _raw["v2.encodeFormat"] = EncodeFormat; _raw["v2.encodeDirection"] = EncodeDirection; WriteBack(); }
+            catch (Exception ex) { Logger.Error("save encode choice failed: " + ex.Message); }
+        }
+
         /// <summary>把当前全部字段写回（设置窗口各项统一走这里，M2b）。</summary>
         public void Save()
         {
@@ -125,6 +141,8 @@ namespace PyTools.Core
             _raw["v2.pinyinSearch"] = PinyinSearch;
             _raw["v2.pageStep"] = PageStep;
             _raw["v2.clipboardPrivacyFilter"] = ClipboardPrivacyFilter;
+            _raw["v2.encodeFormat"] = EncodeFormat;
+            _raw["v2.encodeDirection"] = EncodeDirection;
             var dir = Path.GetDirectoryName(_path);
             if (!string.IsNullOrEmpty(dir)) System.IO.Directory.CreateDirectory(dir);
             File.WriteAllText(_path, _serializer.Serialize(_raw));

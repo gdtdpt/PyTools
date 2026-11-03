@@ -32,6 +32,7 @@ namespace PyTools
         private bool _clipFromLauncher;   // 剪贴板视图是否由启动器条目进入（决定 Esc 退回层级）
         private VscProjectView _vscView;
         private FormatView _formatView;
+        private EncodeView _encodeView;
         private ClipboardHistory _clipHistory;
         private ClipboardWatcher _clipWatcher;
         private bool _clipboardRegistered;
@@ -137,6 +138,10 @@ namespace PyTools
                 _formatView = new FormatView();
                 if (_view != null) _formatView.Margin = _view.Margin;
 
+                // 编码转换视图（M4）：同样寄居呼出壳，无内部藏窗路径（Esc 走 App 层路由）
+                _encodeView = new EncodeView { Config = _config };
+                if (_view != null) _encodeView.Margin = _view.Margin;
+
                 _clipWatcher = new ClipboardWatcher(OnClipboardUpdate);
                 if (!_clipWatcher.Start()) Logger.Error("clipboard watcher failed to start");
 
@@ -165,6 +170,12 @@ namespace PyTools
                     if (ReferenceEquals(content, _formatView))
                     {
                         if (_formatView.TryExitActionMode()) return;
+                        ShowSummon();
+                        return;
+                    }
+                    if (ReferenceEquals(content, _encodeView))
+                    {
+                        if (_encodeView.TryExitActionMode()) return;
                         ShowSummon();
                         return;
                     }
@@ -211,6 +222,7 @@ namespace PyTools
                     if (args.Contains("--clipboard")) ShowClipboard();
                     else if (args.Contains("--vsc")) ShowVsc();
                     else if (args.Contains("--format")) ShowFormat();
+                    else if (args.Contains("--encode")) ShowEncode();
                     else ShowSummon();
                     if (_debugQuery != null)
                     {
@@ -347,6 +359,12 @@ namespace PyTools
             ShowShell(_formatView, _formatView.ResetForFormat, "format");
         }
 
+        /// <summary>编码转换视图（M4）：由启动器内置命令条目进入；每次进入预填剪贴板并立即转换。</summary>
+        private void ShowEncode()
+        {
+            ShowShell(_encodeView, _encodeView.ResetForEncode, "encode");
+        }
+
         private void ShowClipboard()
         {
             ShowClipboard(fromLauncher: false);
@@ -383,6 +401,7 @@ namespace PyTools
             _view.ExitActionMode();
             _vscView.ExitActionMode();
             _formatView.ExitActionMode();
+            _encodeView.ExitActionMode();
             reset();
 
             if (!alreadyVisible)
@@ -393,9 +412,6 @@ namespace PyTools
                 _window.Show();
                 _window.Activate();
             }
-            // 焦点交给内容视图搜索框。必须延迟到 Loaded 优先级：窗口可见中切换 Content 时，
-            // 新视图的 Loaded 在下一拍才触发，同步调用 Focus() 会因 IsLoaded=false 静默失败
-            // （首呼出路径 Window.Show() 同步完成 Loaded，所以该问题只在视图间切换时暴露）。
             // 焦点交给内容视图搜索框。必须延迟到 Loaded 优先级：窗口可见中切换 Content 时，
             // 新视图的 Loaded 在下一拍才触发，同步调用 Focus() 会因 IsLoaded=false 静默失败
             // （首呼出路径 Window.Show() 同步完成 Loaded，所以该问题只在视图间切换时暴露）。
@@ -429,6 +445,7 @@ namespace PyTools
             _view.ExitActionMode();
             _vscView.ExitActionMode();
             _formatView.ExitActionMode();
+            _encodeView.ExitActionMode();
 
             // 位置记忆（沿用 v1 的 windowBounds 键）
             _config.SaveBounds(_window.Left, _window.Top, _window.Width, _window.Height);
@@ -652,6 +669,7 @@ namespace PyTools
                 if (string.Equals(entry.CommandId, "vsc", StringComparison.OrdinalIgnoreCase)) ShowVsc();
                 else if (string.Equals(entry.CommandId, "clipboard", StringComparison.OrdinalIgnoreCase)) ShowClipboard(fromLauncher: true);
                 else if (string.Equals(entry.CommandId, "format", StringComparison.OrdinalIgnoreCase)) ShowFormat();
+                else if (string.Equals(entry.CommandId, "encode", StringComparison.OrdinalIgnoreCase)) ShowEncode();
                 else if (string.Equals(entry.CommandId, "format-clipboard", StringComparison.OrdinalIgnoreCase)) RunFormatClipboardAction();
                 return;
             }

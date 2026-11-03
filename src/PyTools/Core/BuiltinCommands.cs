@@ -51,6 +51,14 @@ namespace PyTools.Core
             },
             new BuiltinCommand
             {
+                Id = "encode",
+                Kind = "view",
+                Title = "常用编码转换",
+                Subtitle = "URL/Base64/Unicode/HTML/JSON/Hex 互转",
+                Aliases = new[] { "encode", "编码" }
+            },
+            new BuiltinCommand
+            {
                 Id = "format-clipboard",
                 Kind = "action",
                 Title = "格式化剪贴板",
