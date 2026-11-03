@@ -13,7 +13,7 @@
         <!-- ContentGrid 满幅承载圆角 Clip（与其他视图同构）；内容边距放内层，
              否则 Clip 相对 Grid 原点生效、外边距不在裁切区内，角落内容会被圆角削掉 -->
         <Grid x:Name="ContentGrid">
-            <Grid Margin="10,8,10,8">
+            <Grid Margin="12,14,12,12">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
