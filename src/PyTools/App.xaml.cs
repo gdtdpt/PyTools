@@ -96,6 +96,11 @@ namespace PyTools
 
             Logger.Init(AppDirectory, debug);
 
+            // S10 补充：清理 v1 遗留的自启注册表残留（键名随版本漂移，v1 升级后删不到旧键）
+            var legacyRuns = PyTools.Core.Startup.CleanupLegacy();
+            if (legacyRuns.Count > 0)
+                Logger.Info("removed legacy autostart Run entries: " + string.Join(", ", legacyRuns));
+
             try
             {
                 _config = AppConfig.Load(Path.Combine(AppDirectory, "config.json"));

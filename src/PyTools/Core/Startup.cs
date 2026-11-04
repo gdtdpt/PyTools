@@ -50,5 +50,42 @@ namespace PyTools.Core
                 return ex.Message;
             }
         }
+
+        /// <summary>
+        /// 判定 Run 项值名是否为历史 PyTools 残留。v1 Electron setLoginItemSettings 的键名
+        /// 由 app.getName() 派生且随版本漂移（实测残留如 "electron.app.pytools-1.6.0"），
+        /// 取消自启只删当前版本键、旧键遗留导致每天自启旧包。判定口径：值名含 "pytools"
+        /// 且不是本应用固定键名 "PyTools"。
+        /// </summary>
+        public static bool IsLegacyName(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return false;
+            return name.IndexOf("pytools", StringComparison.OrdinalIgnoreCase) >= 0
+                && !string.Equals(name, ValueName, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// 启动清理（S10 补充）：删除 Run 项里非本键名的历史 PyTools 残留值。
+        /// 只删 HKCU（免管理员、只影响当前用户），单条失败不中断。返回删除的值名。
+        /// </summary>
+        public static System.Collections.Generic.List<string> CleanupLegacy()
+        {
+            var removed = new System.Collections.Generic.List<string>();
+            try
+            {
+                using (var key = Registry.CurrentUser.OpenSubKey(RunKey, true))
+                {
+                    if (key == null) return removed;
+                    foreach (var name in key.GetValueNames())
+                    {
+                        if (!IsLegacyName(name)) continue;
+                        try { key.DeleteValue(name, false); removed.Add(name); }
+                        catch { /* 单条失败保留，下次启动重试 */ }
+                    }
+                }
+            }
+            catch { /* 注册表不可用时静默，不影响启动 */ }
+            return removed;
+        }
     }
 }

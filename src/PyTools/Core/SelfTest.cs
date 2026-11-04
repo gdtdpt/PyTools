@@ -232,6 +232,17 @@ namespace PyTools.Core
                 return value.StartsWith("\"") && value.EndsWith("\"") && value.Length > 4 ? null : "value=" + value;
             }));
 
+            results.Add(Test("自启：历史残留键名判定（S10）", () =>
+            {
+                if (!Startup.IsLegacyName("electron.app.pytools-1.6.0")) return "v1 版本漂移键应判为残留";
+                if (!Startup.IsLegacyName("app.pytools")) return "v1 简式键应判为残留";
+                if (Startup.IsLegacyName("PyTools")) return "本应用键名不得判为残留";
+                if (Startup.IsLegacyName("pytools")) return "仅大小写不同视同本应用键名";
+                if (Startup.IsLegacyName("OneDrive") || Startup.IsLegacyName("") || Startup.IsLegacyName(null))
+                    return "无关键名/空名误判为残留";
+                return null;
+            }));
+
             results.Add(Test("单实例：add-app payload 文件写入与清理", () =>
             {
                 var file = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, SingleInstance.AddAppFileName);
