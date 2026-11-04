@@ -67,6 +67,14 @@ namespace PyTools.Core
             },
             new BuiltinCommand
             {
+                Id = "regex",
+                Kind = "view",
+                Title = "正则测试",
+                Subtitle = "正则匹配高亮与替换预览",
+                Aliases = new[] { "regex", "正则" }
+            },
+            new BuiltinCommand
+            {
                 Id = "format-clipboard",
                 Kind = "action",
                 Title = "格式化剪贴板",

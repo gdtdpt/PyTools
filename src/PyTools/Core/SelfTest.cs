@@ -795,6 +795,95 @@ namespace PyTools.Core
                 return null;
             }));
 
+            results.Add(Test("RegexTester：基础匹配与位置（g 全局收集）", () =>
+            {
+                var r = RegexTester.Evaluate(@"\d+", "a12b345x", true, false, false, false);
+                if (!r.Ok) return "求值失败: " + r.Error;
+                if (r.Matches.Count != 2) return "应为 2 条，实际 " + r.Matches.Count;
+                if (r.Matches[0].Index != 1 || r.Matches[0].Value != "12") return "第 1 条错";
+                if (r.Matches[1].Index != 4 || r.Matches[1].Value != "345") return "第 2 条错";
+                return null;
+            }));
+
+            results.Add(Test("RegexTester：无 g 只收第一条（v1 语义）", () =>
+            {
+                var r = RegexTester.Evaluate(@"\d+", "a12b345x", false, false, false, false);
+                if (r.Matches.Count != 1) return "应为 1 条，实际 " + r.Matches.Count;
+                if (r.Truncated) return "不应截断";
+                return null;
+            }));
+
+            results.Add(Test("RegexTester：标志位 i / m / s", () =>
+            {
+                var r = RegexTester.Evaluate("ABC", "xabcx", true, true, false, false);
+                if (r.Matches.Count != 1) return "i 未生效";
+                r = RegexTester.Evaluate("^b$", "a\nb\nc", true, false, true, false);
+                if (r.Matches.Count != 1) return "m 未生效（^$ 应逐行）";
+                r = RegexTester.Evaluate("a.b", "a\nb", true, false, false, true);
+                if (r.Matches.Count != 1) return "s 未生效（. 应跨行）";
+                r = RegexTester.Evaluate("^b$", "a\nb\nc", true, false, false, false);
+                if (r.Matches.Count != 0) return "无 m 时 ^$ 不应命中";
+                return null;
+            }));
+
+            results.Add(Test("RegexTester：捕获组与命名组展开顺序（命名在前、$1 起）", () =>
+            {
+                var r = RegexTester.Evaluate(@"(?<year>\d{4})-(\d{2})", "2026-11", true, false, false, false);
+                if (r.Matches.Count != 1) return "应 1 条";
+                var groups = r.Matches[0].Groups;
+                if (groups.Count != 2) return "应展开 2 组，实际 " + groups.Count;
+                if (groups[0].Label != "year (命名)" || groups[0].Value != "2026") return "命名组错: " + groups[0].Label;
+                // .NET 实测：未命名组先编号（此模式未命名组=1）、命名组排后（year=2）→ $1="11" 与 JS 一致
+                if (groups[1].Label != "$1" || groups[1].Value != "11") return "编号组错: " + groups[1].Label;
+                // 纯编号组模式：$1/$2 序号照旧
+                var plain = RegexTester.Evaluate(@"(\d{4})-(\d{2})", "2026-11", true, false, false, false);
+                if (plain.Matches[0].Groups[0].Label != "$1" || plain.Matches[0].Groups[0].Value != "2026") return "纯编号组 $1 错";
+                if (plain.Matches[0].Groups[1].Label != "$2" || plain.Matches[0].Groups[1].Value != "11") return "纯编号组 $2 错";
+                return null;
+            }));
+
+            results.Add(Test("RegexTester：替换语义 $1 与 ${name}（无 g 只换第一处）", () =>
+            {
+                var out1 = RegexTester.Replace(@"(\d{4})-(\d{2})", "2026-11 2027-01", "$2/$1", true, false, false, false);
+                if (out1 != "11/2026 01/2027") return "g 替换错: " + out1;
+                var out2 = RegexTester.Replace(@"(?<m>\d{2})$", "a12", "${m}分", true, false, false, false);
+                if (out2 != "a12分") return "命名替换错: " + out2;
+                var out3 = RegexTester.Replace(@"\d+", "a1b2", "#", false, false, false, false);
+                if (out3 != "a#b2") return "无 g 应只换第一处: " + out3;
+                return null;
+            }));
+
+            results.Add(Test("RegexTester：无效正则报错与零长匹配推进不卡死", () =>
+            {
+                var r = RegexTester.Evaluate("([unclosed", "x", true, false, false, false);
+                if (r.Ok || string.IsNullOrEmpty(r.Error)) return "无效正则未报错";
+                var zero = RegexTester.Evaluate("a*", "bbb", true, false, false, false);
+                if (!zero.Ok) return "零长匹配求值失败: " + zero.Error;
+                if (zero.Matches.Count != 4) return "零长匹配应有限推进（b,b,b+尾），实际 " + zero.Matches.Count;
+                return null;
+            }));
+
+            results.Add(Test("RegexTester：上限 200 条截断与空表达式", () =>
+            {
+                var text = new string('a', 500);
+                var r = RegexTester.Evaluate("a", text, true, false, false, false);
+                if (r.Matches.Count != RegexResult.MatchLimit || !r.Truncated) return "截断未生效";
+                var empty = RegexTester.Evaluate("", text, true, false, false, false);
+                if (!empty.Ok || empty.Matches.Count != 0) return "空表达式应 Ok 且 0 匹配";
+                return null;
+            }));
+
+            results.Add(Test("内置命令：regex 唤醒词命中（regex/正则/前缀）", () =>
+            {
+                var hit = BuiltinCommands.Match("regex");
+                if (hit == null || !hit.IsCommand || hit.CommandId != "regex") return "regex 未命中";
+                var cn = BuiltinCommands.Match("正则");
+                if (cn == null || cn.CommandId != "regex") return "正则 未命中";
+                var partial = BuiltinCommands.Match("reg");
+                if (partial == null || partial.CommandId != "regex") return "前缀未命中";
+                return null;
+            }));
+
             var failed = 0;
             var lines = new List<string>();
             foreach (var r in results)

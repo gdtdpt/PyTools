@@ -34,6 +34,7 @@ namespace PyTools
         private FormatView _formatView;
         private EncodeView _encodeView;
         private CronView _cronView;
+        private RegexView _regexView;
         private ClipboardHistory _clipHistory;
         private ClipboardWatcher _clipWatcher;
         private bool _clipboardRegistered;
@@ -153,6 +154,10 @@ namespace PyTools
                 _cronView = new CronView();
                 if (_view != null) _cronView.Margin = _view.Margin;
 
+                // 正则测试视图（M4）：工具固定尺寸模式（860×620，比 cron 宽——双栏需要）
+                _regexView = new RegexView();
+                if (_view != null) _regexView.Margin = _view.Margin;
+
                 _clipWatcher = new ClipboardWatcher(OnClipboardUpdate);
                 if (!_clipWatcher.Start()) Logger.Error("clipboard watcher failed to start");
 
@@ -193,6 +198,12 @@ namespace PyTools
                     if (ReferenceEquals(content, _cronView))
                     {
                         if (_cronView.TryExitActionMode()) return;
+                        ShowSummon();
+                        return;
+                    }
+                    if (ReferenceEquals(content, _regexView))
+                    {
+                        if (_regexView.TryExitActionMode()) return;
                         ShowSummon();
                         return;
                     }
@@ -241,6 +252,7 @@ namespace PyTools
                     else if (args.Contains("--format")) ShowFormat();
                     else if (args.Contains("--encode")) ShowEncode();
                     else if (args.Contains("--cron")) ShowCron();
+                    else if (args.Contains("--regex")) ShowRegex();
                     else ShowSummon();
                     if (_debugQuery != null)
                     {
@@ -249,6 +261,7 @@ namespace PyTools
                     else if (args.Contains("--vsc")) _vscView.SearchBox.Text = _debugQuery;
                     else if (args.Contains("--format")) { /* 编辑区无查询语义 */ }
                     else if (args.Contains("--cron")) _cronView.ExprBox.Text = _debugQuery;
+                    else if (args.Contains("--regex")) { _regexView.ExprBox.Text = _debugQuery; }
                     else _view.SearchBox.Text = _debugQuery;
                     }
                 }
@@ -395,6 +408,12 @@ namespace PyTools
             ShowShell(_cronView, _cronView.ResetForCron, "cron", new Size(760, 560));
         }
 
+        /// <summary>正则测试视图（M4）：由启动器内置命令条目进入；固定尺寸模式（860×620，双栏需要比 cron 宽）。</summary>
+        private void ShowRegex()
+        {
+            ShowShell(_regexView, _regexView.ResetForRegex, "regex", new Size(860, 620));
+        }
+
         private void ShowClipboard()
         {
             ShowClipboard(fromLauncher: false);
@@ -444,6 +463,7 @@ namespace PyTools
             _formatView.ExitActionMode();
             _encodeView.ExitActionMode();
             _cronView.ExitActionMode();
+            _regexView.ExitActionMode();
             reset();
 
             if (wasToolMode && !toolFixedSize.HasValue) ExitToolSizeMode(content, alreadyVisible);
@@ -628,6 +648,7 @@ namespace PyTools
             _formatView.ExitActionMode();
             _encodeView.ExitActionMode();
             _cronView.ExitActionMode();
+            _regexView.ExitActionMode();
 
             // 工具尺寸模式下藏窗：不当场还原（760×560 瞬缩 640×420 的跳变会被看见）——
             // 保持原样淡出，Hide 之后再瞬间还原（CompleteHide）；落盘直接用还原点
@@ -860,6 +881,7 @@ namespace PyTools
                 else if (string.Equals(entry.CommandId, "format", StringComparison.OrdinalIgnoreCase)) ShowFormat();
                 else if (string.Equals(entry.CommandId, "encode", StringComparison.OrdinalIgnoreCase)) ShowEncode();
                 else if (string.Equals(entry.CommandId, "cron", StringComparison.OrdinalIgnoreCase)) ShowCron();
+                else if (string.Equals(entry.CommandId, "regex", StringComparison.OrdinalIgnoreCase)) ShowRegex();
                 else if (string.Equals(entry.CommandId, "format-clipboard", StringComparison.OrdinalIgnoreCase)) RunFormatClipboardAction();
                 return;
             }
