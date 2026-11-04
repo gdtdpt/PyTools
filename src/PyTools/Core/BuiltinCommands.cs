@@ -75,6 +75,14 @@ namespace PyTools.Core
             },
             new BuiltinCommand
             {
+                Id = "diff",
+                Kind = "view", // 打开独立常驻窗口（不寄居呼出壳），仍属「工具入口」语义
+                Title = "文件差异对比",
+                Subtitle = "并排比较两个文本文件",
+                Aliases = new[] { "diff", "对比" }
+            },
+            new BuiltinCommand
+            {
                 Id = "format-clipboard",
                 Kind = "action",
                 Title = "格式化剪贴板",

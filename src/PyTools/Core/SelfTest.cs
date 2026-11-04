@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Windows;
 using System.Windows.Media;
@@ -892,6 +893,149 @@ namespace PyTools.Core
                 if (cn == null || cn.CommandId != "regex") return "正则 未命中";
                 var partial = BuiltinCommands.Match("reg");
                 if (partial == null || partial.CommandId != "regex") return "前缀未命中";
+                return null;
+            }));
+
+            // ---- 文件差异对比（M4，diff-worker.js 移植）----
+
+            results.Add(Test("DiffEngine：相同文本零差异、行号连续、CRLF 与 LF 等价", () =>
+            {
+                var same = DiffEngine.Compare("a\nb\nc", "a\nb\nc");
+                if (same.DifferenceCount != 0) return "相同文本差异数=" + same.DifferenceCount;
+                if (same.Rows.Count != 3) return "行数=" + same.Rows.Count;
+                if (same.Rows[2].LeftNumber != 3 || same.Rows[2].RightNumber != 3) return "行号不连续";
+                var crlf = DiffEngine.Compare("a\r\nb", "a\nb");
+                if (crlf.DifferenceCount != 0) return "CRLF/LF 应等价（换行协议不计内容）";
+                return null;
+            }));
+
+            results.Add(Test("DiffEngine：change 配对与行内差异（行尾 / 行头）", () =>
+            {
+                var tail = DiffEngine.Compare("timeout = 3000", "timeout = 5000");
+                if (tail.Rows.Count != 1 || tail.Rows[0].Kind != DiffKind.Change) return "应为 1 个 change 行";
+                var leftChanged = string.Concat(tail.Rows[0].LeftParts.Where(p => p.Changed).Select(p => p.Text));
+                var rightChanged = string.Concat(tail.Rows[0].RightParts.Where(p => p.Changed).Select(p => p.Text));
+                if (leftChanged != "3" || rightChanged != "5") return "行尾行内差异错：" + leftChanged + " / " + rightChanged;
+
+                var head = DiffEngine.Compare("retries = 3", "max_retries = 3");
+                if (head.Rows[0].Kind != DiffKind.Change) return "行头场景应为 change";
+                var headAdded = string.Concat(head.Rows[0].RightParts.Where(p => p.Changed).Select(p => p.Text));
+                if (headAdded != "max_") return "行头行内差异错：" + headAdded;
+                var headRemoved = string.Concat(head.Rows[0].LeftParts.Where(p => p.Changed).Select(p => p.Text));
+                if (headRemoved.Length != 0) return "行头左侧不应有删除段：" + headRemoved;
+                return null;
+            }));
+
+            results.Add(Test("DiffEngine：纯增 / 纯删产生空档行且行号归零", () =>
+            {
+                var inserted = DiffEngine.Compare("a\nb", "a\nx\nb");
+                if (inserted.Rows.Count != 3) return "插入场景行数=" + inserted.Rows.Count;
+                var ins = inserted.Rows[1];
+                if (ins.Kind != DiffKind.Insert || ins.Left != null || ins.Right != "x") return "插入行错位";
+                if (ins.LeftNumber != 0 || ins.RightNumber != 2) return "空档行号应为 0";
+                if (ins.LeftNumberText != "" || ins.RightNumberText != "2") return "行号文案错";
+
+                var deleted = DiffEngine.Compare("a\nx\nb", "a\nb");
+                var del = deleted.Rows[1];
+                if (del.Kind != DiffKind.Delete || del.Right != null || del.Left != "x") return "删除行错位";
+                if (del.LeftNumber != 2 || del.RightNumber != 0) return "删除行行号错";
+                return null;
+            }));
+
+            results.Add(Test("DiffEngine：零归一化（空白与标签原样比较）", () =>
+            {
+                var space = DiffEngine.Compare("a", "a ");
+                if (space.DifferenceCount != 1 || space.Rows[0].Kind != DiffKind.Change) return "行尾空格应算差异";
+                var tag = DiffEngine.Compare("<b>x</b>", "x");
+                if (tag.DifferenceCount != 1) return "<b> 标签应原样参与比较（v1 的剥标签补丁已废除）";
+                var fullwidth = DiffEngine.Compare("ａ", "a");
+                if (fullwidth.DifferenceCount != 1) return "全半角应算差异";
+                return null;
+            }));
+
+            results.Add(Test("DiffEngine：重复行（无唯一锚点）不崩且逐行配对", () =>
+            {
+                var left = string.Join("\n", Enumerable.Repeat("same", 40));
+                var right = string.Join("\n", Enumerable.Repeat("other", 40));
+                var r = DiffEngine.Compare(left, right);
+                if (r.Rows.Count != 40) return "行数=" + r.Rows.Count;
+                if (r.DifferenceCount != 40) return "差异数=" + r.DifferenceCount;
+                foreach (var row in r.Rows)
+                    if (row.Kind != DiffKind.Change) return "应全部为 change：" + row.Kind;
+                return null;
+            }));
+
+            results.Add(Test("TextFileLoader：编码检测（UTF-8 / BOM / GBK / UTF-16）", () =>
+            {
+                string name;
+                if (TextFileLoader.Decode(Encoding.UTF8.GetBytes("中文"), out name) != "中文" || name != "UTF-8")
+                    return "无 BOM UTF-8 检测失败: " + name;
+                var bom = new byte[] { 0xEF, 0xBB, 0xBF }.Concat(Encoding.UTF8.GetBytes("中文")).ToArray();
+                if (TextFileLoader.Decode(bom, out name) != "中文" || name != "UTF-8 BOM")
+                    return "UTF-8 BOM 检测失败: " + name;
+                var gbk = TextFileLoader.Decode(Encoding.GetEncoding(936).GetBytes("中文测试"), out name);
+                if (gbk != "中文测试" || name != "GBK") return "GBK 检测失败: " + name + " / " + gbk;
+                var utf16 = Encoding.Unicode.GetPreamble().Concat(Encoding.Unicode.GetBytes("中文")).ToArray();
+                if (TextFileLoader.Decode(utf16, out name) != "中文" || name != "UTF-16 LE")
+                    return "UTF-16 LE BOM 检测失败: " + name;
+                return null;
+            }));
+
+            results.Add(Test("内置命令：diff 唤醒词命中（diff/对比/前缀）", () =>
+            {
+                var hit = BuiltinCommands.Match("diff");
+                if (hit == null || !hit.IsCommand || hit.CommandId != "diff") return "diff 未命中";
+                var cn = BuiltinCommands.Match("对比");
+                if (cn == null || cn.CommandId != "diff") return "对比 未命中";
+                var partial = BuiltinCommands.Match("dif");
+                if (partial == null || partial.CommandId != "diff") return "前缀未命中";
+                return null;
+            }));
+
+            results.Add(Test("DiffEngine：差异跳转索引与前后查找（含回绕）", () =>
+            {
+                // 行模型：equal / change / equal / insert / equal / delete / equal
+                var r = DiffEngine.Compare("a\nb\nc\nd\ne\nf\ng", "a\nX\nc\nNEW\ne\ng");
+                var indexes = DiffEngine.DiffLineIndexes(r.Rows);
+                if (indexes.Count != 3) return "差异行索引数=" + indexes.Count;
+
+                bool wrapped;
+                var first = DiffEngine.FindJumpTarget(indexes, 0, true, out wrapped);
+                if (wrapped || indexes[first] != indexes[0]) return "从头向后应命中第一处";
+                var second = DiffEngine.FindJumpTarget(indexes, indexes[0], true, out wrapped);
+                if (wrapped || indexes[second] <= indexes[0]) return "第二处应大于第一处";
+                var last = DiffEngine.FindJumpTarget(indexes, indexes[1], true, out wrapped);
+                if (wrapped || indexes[last] != indexes[2]) return "第三处应为最后一个差异行";
+                var loop = DiffEngine.FindJumpTarget(indexes, indexes[2], true, out wrapped);
+                if (!wrapped || loop != 0) return "到底应回绕到第一处";
+
+                var back = DiffEngine.FindJumpTarget(indexes, indexes[2], false, out wrapped);
+                if (wrapped || indexes[back] >= indexes[2]) return "向前应命中上一个差异行";
+                var loopBack = DiffEngine.FindJumpTarget(indexes, 0, false, out wrapped);
+                if (!wrapped || loopBack != indexes.Count - 1) return "到顶应回绕到最后一处";
+                return null;
+            }));
+
+            results.Add(Test("DiffEngine：无差异跳转返回 -1、不可见字符判定", () =>
+            {
+                bool wrapped;
+                if (DiffEngine.FindJumpTarget(new List<int>(), 0, true, out wrapped) != -1) return "空索引应返回 -1";
+                if (!DiffEngine.IsInvisibleChar('\u200B')) return "零宽空格应判为不可见";
+                if (!DiffEngine.IsInvisibleChar('\uFEFF')) return "BOM/零宽不换行空格应判为不可见";
+                if (!DiffEngine.IsInvisibleChar('\u00AD')) return "软连字符应判为不可见";
+                if (DiffEngine.IsInvisibleChar(' ') || DiffEngine.IsInvisibleChar('\t') || DiffEngine.IsInvisibleChar('a'))
+                    return "普通空格/Tab/字母不应判为不可见";
+                return null;
+            }));
+
+            results.Add(Test("DiffEngine：不可见字符差异如实报告且片段标记 Changed", () =>
+            {
+                var r = DiffEngine.Compare("abc", "abc\u200Bdef");
+                if (r.DifferenceCount != 1) return "零宽空格差异应算 1 处";
+                var row = r.Rows[0];
+                if (row.Kind != DiffKind.Change) return "应为 change 行";
+                var rightChanged = row.RightParts.Where(delegate(DiffPart p) { return p.Changed && DiffEngine.ContainsInvisible(p.Text); }).ToList();
+                if (rightChanged.Count == 0) return "右侧应有含不可见字符的差异片段";
                 return null;
             }));
 

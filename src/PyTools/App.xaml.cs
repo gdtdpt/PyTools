@@ -35,6 +35,7 @@ namespace PyTools
         private EncodeView _encodeView;
         private CronView _cronView;
         private RegexView _regexView;
+        private DiffWindow _diffWindow; // 独立常驻窗口（M4 diff）：不寄居呼出壳，关闭即销毁
         private ClipboardHistory _clipHistory;
         private ClipboardWatcher _clipWatcher;
         private bool _clipboardRegistered;
@@ -43,10 +44,14 @@ namespace PyTools
         private AppIndex _index;
         private bool _bubbleNextScan; // 手动重扫后气泡反馈（首扫不气泡）
         private string _debugQuery;   // --debug 配套 --query=<词>：呼出即预填搜索（UI 截图自验用）
+        private string _debugDiffLeft;  // --diff-left=<路径>：diff 窗口预载左文件（截图自验用）
+        private string _debugDiffRight; // --diff-right=<路径>：diff 窗口预载右文件
         private string _bootAddApp;   // 冷启动 --add-app=<路径>：静默驻留，不呼出窗口
         private IntPtr _hotkeyHwnd = IntPtr.Zero;
         private HwndSource _hotkeySource;
         private bool _capturedForeground; // 呼出前已记录前台
+        private bool _skipFocusRestoreOnce; // 下一次藏窗不恢复前台焦点（独立窗口接管焦点时用）
+        private Action _afterHide;          // 壳真正隐藏后要执行的动作（打开独立窗口用，一次性）
         private IntPtr _capturedTarget = IntPtr.Zero;
         private SynchronizationContext _uiContext;
 
@@ -75,6 +80,14 @@ namespace PyTools
                 if (arg.StartsWith("--query=", StringComparison.Ordinal))
                 {
                     _debugQuery = arg.Substring("--query=".Length);
+                }
+                else if (arg.StartsWith("--diff-left=", StringComparison.Ordinal))
+                {
+                    _debugDiffLeft = arg.Substring("--diff-left=".Length);
+                }
+                else if (arg.StartsWith("--diff-right=", StringComparison.Ordinal))
+                {
+                    _debugDiffRight = arg.Substring("--diff-right=".Length);
                 }
             }
             _bootAddApp = ExtractAddAppArg(args); // 空串 = 带参数但值无效；null = 未带参数
@@ -258,6 +271,14 @@ namespace PyTools
                     else if (args.Contains("--encode")) ShowEncode();
                     else if (args.Contains("--cron")) ShowCron();
                     else if (args.Contains("--regex")) ShowRegex();
+                    else if (args.Contains("--diff"))
+                    {
+                        // 预载必须挂到开窗回调里：窗口要到壳隐藏后才创建
+                        ShowDiff(delegate
+                        {
+                            if (_diffWindow != null) _diffWindow.DebugPreload(_debugDiffLeft, _debugDiffRight);
+                        });
+                    }
                     else ShowSummon();
                     if (_debugQuery != null)
                     {
@@ -417,6 +438,33 @@ namespace PyTools
         private void ShowRegex()
         {
             ShowShell(_regexView, _regexView.ResetForRegex, "regex", new Size(860, 620));
+        }
+
+        /// <summary>
+        /// 文件差异对比（M4 第六项）：**独立常驻窗口**，不寄居呼出壳。
+        /// 关闭 diff 不回启动器（用户拍板：关闭 = 一次工具调用工作结束）；再次从启动器进入即新开一次。
+        /// 收起呼出壳但不恢复前台焦点——焦点要交给 diff 窗口。
+        /// </summary>
+        private void ShowDiff(Action afterOpen = null)
+        {
+            if (_diffWindow != null)
+            {
+                _diffWindow.Activate();
+                if (afterOpen != null) afterOpen();
+                return;
+            }
+
+            // 顺序很关键：先 Show+Activate 让 diff 拿到前台，再收壳。
+            // 反过来（先藏壳再开窗）实测前台会落到进程内隐藏的 Hotkey 消息窗口上，diff 只到 Z 序顶层却没激活。
+            // 壳这边：Activate 会触发它的 Deactivated → 自动开始收起；这里的 restoreFocus:false 只是补上
+            // 「收起后别把呼出前的窗口抢回前台」的标记（重入路径不清标记，见 HideSummon）。
+            _diffWindow = new DiffWindow();
+            _diffWindow.Closed += delegate { _diffWindow = null; };
+            _diffWindow.Show();
+            _diffWindow.Activate();
+            HideSummon(restoreFocus: false);
+            Logger.Info("diff window opened");
+            if (afterOpen != null) afterOpen();
         }
 
         private void ShowClipboard()
@@ -643,7 +691,34 @@ namespace PyTools
 
         private void HideSummon()
         {
-            if (_window == null || _hiding || !_window.IsVisible) return;
+            HideSummon(true, null);
+        }
+
+        private void HideSummon(bool restoreFocus)
+        {
+            HideSummon(restoreFocus, null);
+        }
+
+        /// <summary>
+        /// restoreFocus=false：藏窗后不把焦点还给呼出前的窗口（如焦点要转交给随后打开的独立窗口）。
+        /// afterHide：壳**真正隐藏**（淡出动画结束）后才执行的后续动作。独立窗口必须挂在这里开——
+        /// 壳是 Topmost 且此刻仍是前台，提前 Show 会让新窗口先成为前台、随即被壳的隐藏/焦点恢复压到后面（diff 实测踩过）。
+        /// </summary>
+        private void HideSummon(bool restoreFocus, Action afterHide)
+        {
+            if (afterHide != null) _afterHide = afterHide;
+            if (!restoreFocus) _skipFocusRestoreOnce = true;
+            if (_window == null || !_window.IsVisible)
+            {
+                // 壳没显示：没有隐藏过程可等，直接执行后续动作（并清掉本次焦点标记，避免残留到下一次藏窗）
+                _skipFocusRestoreOnce = false;
+                RunAfterHide();
+                return;
+            }
+            // 已在收起流程中：本次调用的 skip/afterHide 交给进行中的那次消费。
+            // 这里绝不能清 _skipFocusRestoreOnce——新窗口 Activate 会让壳触发 Deactivated → HideSummon()，
+            // 清掉标记后收尾就会把呼出前的窗口抢回前台，新窗口被压到后面。
+            if (_hiding) return;
             var sw = Stopwatch.StartNew();
             _hiding = true;
 
@@ -688,8 +763,10 @@ namespace PyTools
             if (_capturedForeground)
             {
                 _capturedForeground = false;
-                Foreground.Restore(_capturedTarget);
+                var target = _capturedTarget;
                 _capturedTarget = IntPtr.Zero;
+                if (_skipFocusRestoreOnce) _skipFocusRestoreOnce = false; // 焦点转交给新打开的独立窗口
+                else Foreground.Restore(target);
             }
 
             sw.Stop();
@@ -697,6 +774,20 @@ namespace PyTools
 
             // 剪贴板回填：必须在焦点恢复之后才写——否则用户按 Ctrl+V 会粘回自己
             FlushPendingWriteBack();
+
+            // 壳已彻底隐藏，此刻才适合打开接管焦点的独立窗口
+            RunAfterHide();
+        }
+
+        /// <summary>执行并清空 afterHide 回调；同时清掉未消费的焦点标记（壳没显示/无捕获时标记会残留）。</summary>
+        private void RunAfterHide()
+        {
+            _skipFocusRestoreOnce = false;
+            var action = _afterHide;
+            _afterHide = null;
+            if (action == null) return;
+            try { action(); }
+            catch (Exception ex) { Logger.Error("after-hide action failed: " + ex.Message); }
         }
 
         private void EnsureOnScreen()
@@ -887,6 +978,7 @@ namespace PyTools
                 else if (string.Equals(entry.CommandId, "encode", StringComparison.OrdinalIgnoreCase)) ShowEncode();
                 else if (string.Equals(entry.CommandId, "cron", StringComparison.OrdinalIgnoreCase)) ShowCron();
                 else if (string.Equals(entry.CommandId, "regex", StringComparison.OrdinalIgnoreCase)) ShowRegex();
+                else if (string.Equals(entry.CommandId, "diff", StringComparison.OrdinalIgnoreCase)) ShowDiff();
                 else if (string.Equals(entry.CommandId, "format-clipboard", StringComparison.OrdinalIgnoreCase)) RunFormatClipboardAction();
                 return;
             }
@@ -1111,6 +1203,7 @@ namespace PyTools
                 }
                 if (_hotkeySource != null) _hotkeySource.Dispose();
                 if (_clipWatcher != null) _clipWatcher.Dispose();
+                if (_diffWindow != null) _diffWindow.Close(); // 常驻工具窗口随托盘退出一并关闭
                 if (_window != null && _window.IsVisible)
                 {
                     if (_toolSizeMode) SnapRestoreBounds(); // 工具尺寸模式：退出前还原，位置记忆不被污染

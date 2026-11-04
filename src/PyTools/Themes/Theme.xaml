@@ -31,6 +31,20 @@
     <SolidColorBrush x:Key="Text.Disabled" Color="#9EA0A4"/>   <!-- 禁用文字（与 Placeholder 同值，语义分离）-->
     <SolidColorBrush x:Key="Text.OnAccentDisabled" Color="#9DB4EE"/> <!-- 主按钮禁用时压在淡蓝底上的文字 -->
 
+    <!-- 差异对比配色（text-diff；v1 的 rgba 半透明底色预混成不透明实色，暗色主题只需换本组） -->
+    <SolidColorBrush x:Key="Diff.Add.Bg" Color="#DDF0E0"/>        <!-- 增行（绿底，v1 rgba(68,174,86,.18)）-->
+    <SolidColorBrush x:Key="Diff.Del.Bg" Color="#F9E0E0"/>        <!-- 删行（红底，v1 rgba(224,85,85,.18)）-->
+    <SolidColorBrush x:Key="Diff.Gap.Bg" Color="#FCF1F1"/>        <!-- 对面空档（淡红，v1 rgba(224,85,85,.08)）-->
+    <SolidColorBrush x:Key="Diff.Inline.Add" Color="#BDE3C4"/>    <!-- 行内增段（v1 rgba(68,174,86,.35)）-->
+    <SolidColorBrush x:Key="Diff.Inline.Del" Color="#F4C4C4"/>    <!-- 行内删段（v1 rgba(224,85,85,.35)）-->
+    <SolidColorBrush x:Key="Diff.Gutter.Bg" Color="#F4F5F7"/>     <!-- 行号列底 -->
+    <SolidColorBrush x:Key="Diff.Gutter.Equal" Color="#D6DAE1"/>  <!-- 行号列左缘状态条：无差异 -->
+    <SolidColorBrush x:Key="Diff.Marker.Changed" Color="#BA7517"/> <!-- 行号列左缘状态条：修改行 -->
+    <SolidColorBrush x:Key="Diff.Inline.Add.Focus" Color="#A9DFBA"/> <!-- 行内增段聚焦加深（F3 命中行）-->
+    <SolidColorBrush x:Key="Diff.Inline.Del.Focus" Color="#EFABAB"/> <!-- 行内删段聚焦加深 -->
+    <SolidColorBrush x:Key="Diff.Invisible" Color="#B8BFC9"/>     <!-- 不可见字符竖条标识（零宽空格等，0 宽渲染不可见故以光标大小色条占位）-->
+    <SolidColorBrush x:Key="Diff.Focus.Bg" Color="#FFF6D9"/>      <!-- 跳转命中行整行淡黄底（取代该行增/删底色，行内红绿片段仍指向差异方向）-->
+
     <!-- 字号 -->
     <system:Double xmlns:system="clr-namespace:System;assembly=mscorlib" x:Key="Font.Base">14</system:Double>
     <system:Double xmlns:system="clr-namespace:System;assembly=mscorlib" x:Key="Font.Secondary">12</system:Double>
