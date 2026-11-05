@@ -104,7 +104,13 @@
                                            Stretch="Uniform"
                                            Visibility="{Binding IsImage, Converter={StaticResource BoolToVisible}}"
                                            RenderOptions.BitmapScalingMode="HighQuality"/>
-                                    <!-- 文本 / 文件：类型字符占位块 -->
+                                    <!-- 文件：shell 小图标（2026-11-05 打磨，替换原「件」字符） -->
+                                    <Image Source="{Binding FileIcon}"
+                                           Width="28" Height="28"
+                                           Stretch="Uniform"
+                                           Visibility="{Binding IsFile, Converter={StaticResource BoolToVisible}}"
+                                           RenderOptions.BitmapScalingMode="HighQuality"/>
+                                    <!-- 文本：类型字符占位块 -->
                                     <Border Width="28" Height="28"
                                             CornerRadius="{DynamicResource Radius.Control}"
                                             Background="{DynamicResource Bg.ItemHover}">
@@ -113,6 +119,9 @@
                                                 <Setter Property="Visibility" Value="Visible"/>
                                                 <Style.Triggers>
                                                     <DataTrigger Binding="{Binding IsImage}" Value="True">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding IsFile}" Value="True">
                                                         <Setter Property="Visibility" Value="Collapsed"/>
                                                     </DataTrigger>
                                                 </Style.Triggers>
@@ -125,16 +134,27 @@
                                                    Foreground="{DynamicResource Text.Secondary}"/>
                                     </Border>
                                 </Grid>
-                                <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="0,0,10,0">
+                                <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="8,0,10,0">
                                     <TextBlock Text="{Binding Title}"
                                                FontSize="{DynamicResource Font.Base}"
                                                Foreground="{DynamicResource Text.Primary}"
-                                               TextTrimming="CharacterEllipsis"/>
+                                               TextTrimming="CharacterEllipsis">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Style.Triggers>
+                                                    <!-- 文件已不存在：灰显（2026-11-05 打磨） -->
+                                                    <DataTrigger Binding="{Binding IsMissing}" Value="True">
+                                                        <Setter Property="Foreground" Value="{DynamicResource Text.Placeholder}"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
                                     <TextBlock Text="{Binding Subtitle}"
                                                FontSize="{DynamicResource Font.Secondary}"
                                                Foreground="{DynamicResource Text.Secondary}"
                                                TextTrimming="CharacterEllipsis"
-                                               Margin="0,1,0,0"/>
+                                               Margin="0,3,0,0"/>
                                 </StackPanel>
                             </Grid>
                         </DataTemplate>

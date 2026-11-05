@@ -130,6 +130,7 @@
     <Compile Include="Core\AppScanner.cs" />
     <Compile Include="Core\AppLauncher.cs" />
     <Compile Include="Core\CustomApps.cs" />
+    <Compile Include="Core\FileIcons.cs" />
     <Compile Include="Core\IconCache.cs" />
     <Compile Include="Core\Pinyin.cs" />
     <Compile Include="Core\ContextMenuRegistry.cs" />

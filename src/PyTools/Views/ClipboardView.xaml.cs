@@ -37,8 +37,31 @@ namespace PyTools.Views
         public ClipRecord Record { get; private set; }
 
         public bool IsImage { get { return Record.IsImage; } }
+        public bool IsFile { get { return Record.Kind == ClipKind.Files; } }
+        public bool IsMissing { get { return Record.IsMissing; } }
         public string Title { get { return Record.Preview; } }
         public string Glyph { get { return Record.Glyph; } }
+
+        /// <summary>文件行图标：按扩展名走 shell 小图标（内存缓存，文件已删除也能出图标）。</summary>
+        public BitmapSource FileIcon
+        {
+            get
+            {
+                if (!IsFile) return null;
+                if (_iconTried) return _icon;
+                _iconTried = true;
+                try
+                {
+                    var path = Record.Files != null && Record.Files.Count > 0 ? Record.Files[0].Path : null;
+                    _icon = FileIcons.ForPath(path);
+                }
+                catch { _icon = null; }
+                return _icon;
+            }
+        }
+
+        private BitmapSource _icon;
+        private bool _iconTried;
 
         public string Subtitle
         {
@@ -122,12 +145,18 @@ namespace PyTools.Views
             SearchBox.SelectAll();
         }
 
-        /// <summary>呼出时重置：清空查询并重建列表（空查询 = 全部记录）。</summary>
+        /// <summary>呼出时重置：清空查询并重建列表（空查询 = 全部记录），滚动归零——每次打开都从最近开始。</summary>
         public void ResetForClipboard()
         {
             PART_SearchBox.Text = "";
             RefreshList();
-            Dispatcher.BeginInvoke(new Action(delegate { RecalcBadges(); }), DispatcherPriority.Loaded);
+            // 重建 ItemsSource 后虚拟化面板会保留上次的垂直偏移，须显式归零（布局完成后再滚）。
+            // ScrollToHome 同时会把选中项带回可视区顶部，与「从最近开始」的语义一致。
+            Dispatcher.BeginInvoke(new Action(delegate
+            {
+                if (_scroll != null) _scroll.ScrollToHome();
+                RecalcBadges();
+            }), DispatcherPriority.Loaded);
         }
 
         /// <summary>历史有新记录时刷新（窗口可见时才刷）。</summary>

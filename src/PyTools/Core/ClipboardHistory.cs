@@ -2,8 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
 using System.Web.Script.Serialization;
 using System.Windows;
 using System.Windows.Media;
@@ -68,16 +70,64 @@ namespace PyTools.Core
             }
         }
 
-        /// <summary>副标题：文本字数 / 文件个数 / 图片尺寸（捕获时记录；重启后由缩略图路径从 PNG 头回填）。</summary>
+        /// <summary>副标题：文本字数 / 文件个数与目录 / 图片尺寸（捕获时记录；重启后由缩略图路径从 PNG 头回填）。</summary>
         public string Subtitle
         {
             get
             {
                 if (Kind == ClipKind.Text) return "共 " + (Text == null ? 0 : Text.Length) + " 字";
-                if (Kind == ClipKind.Files) return "共 " + (Files == null ? 0 : Files.Count) + " 个文件";
+                if (Kind == ClipKind.Files) return FilesSubtitle();
                 return _imageSize ?? "图片";
             }
         }
+
+        /// <summary>
+        /// 文件副标题（2026-11-05 打磨）：单文件给所在目录、多文件给「共 N 个文件 · 目录」（同目录才算）；
+        /// 文件全被删/移走时报「文件已不存在」，避免用户粘回一个死路径。
+        /// </summary>
+        private string FilesSubtitle()
+        {
+            if (Files == null || Files.Count == 0) return "文件";
+            if (!AnyFileExists()) return "文件已不存在";
+            var firstDir = DirectoryOf(Files[0].Path);
+            if (string.IsNullOrEmpty(firstDir)) return "共 " + Files.Count + " 个文件";
+            if (Files.Count == 1) return firstDir;
+            for (var i = 1; i < Files.Count; i++)
+            {
+                if (!string.Equals(DirectoryOf(Files[i].Path), firstDir, StringComparison.OrdinalIgnoreCase))
+                    return "共 " + Files.Count + " 个文件";
+            }
+            return "共 " + Files.Count + " 个文件 · " + firstDir;
+        }
+
+        private static string DirectoryOf(string path)
+        {
+            try { return string.IsNullOrEmpty(path) ? "" : (Path.GetDirectoryName(path) ?? ""); }
+            catch { return ""; }
+        }
+
+        private bool? _anyExists;
+
+        /// <summary>至少一个路径仍存在。结果按记录缓存（列表重绘时不重复 stat）。</summary>
+        public bool AnyFileExists()
+        {
+            if (Kind != ClipKind.Files || Files == null || Files.Count == 0) return true;
+            if (_anyExists.HasValue) return _anyExists.Value;
+            var exists = false;
+            foreach (var file in Files)
+            {
+                try
+                {
+                    if (!string.IsNullOrEmpty(file.Path) && File.Exists(file.Path)) { exists = true; break; }
+                }
+                catch { /* 非法路径按不存在处理 */ }
+            }
+            _anyExists = exists;
+            return exists;
+        }
+
+        /// <summary>文件被删/移走后列表里灰显。</summary>
+        public bool IsMissing { get { return Kind == ClipKind.Files && !AnyFileExists(); } }
 
         private string _imageSize;
 
@@ -325,9 +375,11 @@ namespace PyTools.Core
                         data.SetData(DataFormats.Text, record.Text);
                         break;
                     case ClipKind.Files:
-                        var paths = new System.Collections.Specialized.StringCollection();
-                        foreach (var file in record.Files) paths.Add(file.Path);
-                        data.SetFileDropList(paths);
+                        var paths = ExistingPaths(record.Files);
+                        if (paths.Count == 0) return "文件已不存在，无法写回剪贴板";
+                        var list = new System.Collections.Specialized.StringCollection();
+                        foreach (var path in paths) list.Add(path);
+                        data.SetFileDropList(list);
                         break;
                     case ClipKind.Image:
                         var image = DecodeFull(record);
@@ -335,7 +387,7 @@ namespace PyTools.Core
                         data.SetImage(image);
                         break;
                 }
-                Clipboard.SetDataObject(data, true);
+                SetClipboardWithRetry(data);
 
                 // 置顶 + 刷新时间（v1 select 语义）
                 _records.Remove(record);
@@ -344,9 +396,37 @@ namespace PyTools.Core
                 Save();
                 return null;
             }
+            catch (COMException ex) when ((uint)ex.HResult == 0x800401D0)
+            {
+                return "写回剪贴板失败：剪贴板被其他程序占用（已重试仍失败），请稍后重试";
+            }
             catch (Exception ex)
             {
                 return "写回剪贴板失败：" + ex.Message;
+            }
+        }
+
+        /// <summary>
+        /// 带重试的写回：截图工具/剪贴板管理器会较长时间握住剪贴板句柄，
+        /// Clipboard.SetDataObject 内置重试仅约 200ms，不够；外层再补 5 次 × 120ms。
+        /// 仅对 CLIPBRD_E_CANT_OPEN（0x800401D0，剪贴板被占用）重试，其他错误直接抛。
+        /// </summary>
+        private static void SetClipboardWithRetry(DataObject data)
+        {
+            const int attempts = 5;
+            const int retryDelayMs = 120;
+            const uint CLIPBRD_E_CANT_OPEN = 0x800401D0;
+            for (var i = 0; ; i++)
+            {
+                try
+                {
+                    Clipboard.SetDataObject(data, true);
+                    return;
+                }
+                catch (COMException ex) when ((uint)ex.HResult == CLIPBRD_E_CANT_OPEN && i < attempts - 1)
+                {
+                    Thread.Sleep(retryDelayMs);
+                }
             }
         }
 
@@ -472,6 +552,22 @@ namespace PyTools.Core
         }
 
         // ---- 读剪贴板内容 ----
+
+        /// <summary>写回前筛掉已不存在的路径（2026-11-05 打磨）：粘一个死路径出去只会让资源管理器报错。internal 仅供 selftest。</summary>
+        internal static List<string> ExistingPaths(List<ClipFile> files)
+        {
+            var paths = new List<string>();
+            if (files == null) return paths;
+            foreach (var file in files)
+            {
+                try
+                {
+                    if (!string.IsNullOrEmpty(file.Path) && File.Exists(file.Path)) paths.Add(file.Path);
+                }
+                catch { /* 非法路径跳过 */ }
+            }
+            return paths;
+        }
 
         private static List<ClipFile> ReadFiles(IDataObject data)
         {

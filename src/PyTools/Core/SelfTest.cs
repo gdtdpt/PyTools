@@ -1332,6 +1332,65 @@ namespace PyTools.Core
                 return null;
             }));
 
+            results.Add(Test("ClipboardHistory：文件条目捕获/去重/落盘往返/失效判定", () =>
+            {
+                var dir = TempClipDir();
+                try
+                {
+                    var a = Path.Combine(dir, "alpha.txt");
+                    var b = Path.Combine(dir, "beta.txt");
+                    File.WriteAllText(a, "a");
+                    File.WriteAllText(b, "b");
+
+                    var drop = new System.Collections.Specialized.StringCollection();
+                    drop.Add(a);
+                    drop.Add(b);
+                    var data = new DataObject();
+                    data.SetFileDropList(drop);
+
+                    var history = new ClipboardHistory(dir);
+                    string skip;
+                    var record = history.Capture(data, out skip);
+                    if (record == null) return "文件条目应被捕获: " + skip;
+                    if (record.Kind != ClipKind.Files) return "类型应为 Files";
+                    if (record.Files.Count != 2) return "文件数应为 2，实际 " + record.Files.Count;
+                    if (record.Files[0].Name != "alpha.txt") return "文件名解析错误: " + record.Files[0].Name;
+                    if (record.Signature == null || record.Signature != record.Signature.ToLowerInvariant())
+                        return "签名应为小写路径串: " + record.Signature;
+                    if (record.Preview != "alpha.txt") return "标题应取首个文件名";
+
+                    // 同路径再复制一次：不新增，只置顶
+                    var duplicate = history.Capture(data, out skip);
+                    if (duplicate != null || skip != "duplicate") return "重复文件应判重，实际 skip=" + skip;
+                    if (history.Records.Count != 1) return "判重后记录数应仍为 1";
+
+                    // 副标题：多文件同目录 → 「共 2 个文件 · 目录」
+                    var subtitle = record.Subtitle;
+                    if (subtitle.IndexOf("共 2 个文件", StringComparison.Ordinal) < 0) return "多文件副标题缺个数: " + subtitle;
+                    if (subtitle.IndexOf(dir, StringComparison.OrdinalIgnoreCase) < 0) return "多文件副标题缺目录: " + subtitle;
+
+                    // 落盘往返：重新打开同一目录应读回同一条
+                    var reloaded = new ClipboardHistory(dir);
+                    if (reloaded.Records.Count != 1) return "重启后记录数应为 1，实际 " + reloaded.Records.Count;
+                    var restored = reloaded.Records[0];
+                    if (restored.Kind != ClipKind.Files || restored.Files.Count != 2) return "往返后文件条目丢失";
+                    if (!string.Equals(restored.Files[1].Path, b, StringComparison.OrdinalIgnoreCase)) return "往返后路径不一致";
+
+                    // 失效判定：删掉文件 → 灰显 + 副标题提示 + 写回前筛选
+                    File.Delete(a);
+                    File.Delete(b);
+                    var missing = new ClipboardHistory(dir).Records[0];
+                    if (!missing.IsMissing) return "文件删除后应判为失效";
+                    if (missing.Subtitle != "文件已不存在") return "失效副标题应为「文件已不存在」，实际 " + missing.Subtitle;
+                    if (ClipboardHistory.ExistingPaths(missing.Files).Count != 0) return "失效路径应被写回筛掉";
+
+                    File.WriteAllText(a, "a");
+                    if (ClipboardHistory.ExistingPaths(missing.Files).Count != 1) return "存活路径应保留";
+                    return null;
+                }
+                finally { TryDeleteDir(dir); }
+            }));
+
             var failed = 0;
             var lines = new List<string>();
             foreach (var r in results)
