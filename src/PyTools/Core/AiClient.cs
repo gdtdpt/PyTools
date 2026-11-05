@@ -37,6 +37,7 @@ namespace PyTools.Core
         private const int RequestTimeoutMs = 30000;
         private const int ModelsTimeoutMs = 15000;
         private const int OcrTimeoutMs = 60000; // OCR 图大、推理慢，v1 同口径 60s
+        private const int TranslateTimeoutMs = 60000; // 整篇文档翻译可能很长，同 OCR 口径 60s
 
         private const string SystemPrompt =
             "你是内网里的正则表达式助手。根据用户给出的自然语言目标或样例文本，生成最合适的正则表达式。\n" +
@@ -463,6 +464,136 @@ namespace PyTools.Core
             // 纯文本兜底：模型忽略了 JSON 要求但正文有效，白跑一次请求太亏（拍板 #1）
             var plain = StripCodeFence(content, AnyFencePattern).Trim();
             return plain.Length > 0 ? new AiOcrResult { Text = plain } : new AiOcrResult { Error = "AI 未识别出文字" };
+        }
+
+        // ---- 翻译（v1 ai-translate 语义 + v2 单次请求口径，M4 AI 批第三个消费者）----
+
+        /// <summary>
+        /// 翻译提示词：v1 口径 + 三条 v2 增强（保留换行段落、代码/专有名词原样、
+        /// 源语言未知时自判并回 detectedLang，省掉 v1 的独立 detect 请求）。
+        /// </summary>
+        private const string TranslatePrompt =
+            "你是内网里的翻译助手。用户会给出 sourceLang、targetLang 和 text，请把 text 翻译成 targetLang。\n" +
+            "- sourceLang 为空表示原文语种未知，请自行判断\n" +
+            "- 保留原文的换行与段落结构\n" +
+            "- 代码片段、变量名、命令、URL、专有名词原样保留，不翻译\n" +
+            "只输出一个 JSON 对象，不要输出 Markdown、代码块或解释性文字。JSON 字段:\n" +
+            "- translation: 译文文本（保留换行）\n" +
+            "- detectedLang: 原文语种，取 zh-CN、en、ja 之一；无法判断时留空\n" +
+            "- error: 翻译失败时的简短中文原因；成功留空";
+
+        public sealed class AiTranslateResult
+        {
+            public bool Ok;
+            public string Translation = "";
+            public string DetectedLang = "";   // 源语言自动时模型自判结果（zh-CN / en / ja，可能为空）
+            public string Model = "";
+            public string Error = "";
+            public bool RequestFailed;         // 请求类失败（超时/网络/HTTP）→ UI 提示可在设置中更换模型
+        }
+
+        public static Task<AiTranslateResult> TranslateAsync(string sourceLang, string targetLang, string text)
+        {
+            return Task.Run(delegate { return Translate(sourceLang, targetLang, text); });
+        }
+
+        public static AiTranslateResult Translate(string sourceLang, string targetLang, string text, string dir = null)
+        {
+            var d = Dir(dir);
+            var status = Status(d);
+            if (!status.Available) return new AiTranslateResult { Error = status.Reason };
+            if (string.IsNullOrWhiteSpace(text)) return new AiTranslateResult { Error = "请输入要翻译的文本" };
+            if (string.IsNullOrWhiteSpace(targetLang)) return new AiTranslateResult { Error = "请选择目标语言" };
+
+            var cfg = LoadConfig(d);
+            AiTranslateResult parsed;
+            try
+            {
+                var raw = Request(cfg, cfg.BaseUrl, "POST",
+                    Serialize(BuildTranslatePayload(cfg, sourceLang, targetLang, text)), TranslateTimeoutMs);
+                parsed = ParseTranslateResponse(raw);
+            }
+            catch (WebException wex)
+            {
+                return new AiTranslateResult { Error = RequestErrorText(wex, TranslateTimeoutMs), RequestFailed = true };
+            }
+            catch (Exception ex)
+            {
+                return new AiTranslateResult { Error = ex.Message, RequestFailed = true };
+            }
+
+            if (parsed.Error.Length > 0) return parsed;
+            parsed.Ok = true;
+            parsed.Model = cfg.Model;
+            return parsed;
+        }
+
+        /// <summary>翻译请求体：纯文本 content（离线可测；不含 tools）。</summary>
+        internal static Dictionary<string, object> BuildTranslatePayload(AiLocalConfig cfg, string sourceLang,
+            string targetLang, string text)
+        {
+            var user = new Dictionary<string, object>
+            {
+                { "sourceLang", sourceLang ?? "" },
+                { "targetLang", targetLang ?? "" },
+                { "text", text ?? "" },
+            };
+            var payload = new Dictionary<string, object>
+            {
+                {
+                    "messages", new object[]
+                    {
+                        new Dictionary<string, object> { { "role", "system" }, { "content", TranslatePrompt } },
+                        new Dictionary<string, object> { { "role", "user" }, { "content", Serialize(user) } },
+                    }
+                },
+                { "temperature", 0 }, // 翻译要稳定复现，同一句不应每次不同
+            };
+            if (cfg.Model.Length > 0) payload["model"] = cfg.Model;
+            if (cfg.MaxTokens.HasValue) payload["max_tokens"] = cfg.MaxTokens.Value;
+            return payload;
+        }
+
+        /// <summary>翻译响应解析（离线可测）：直返 translation → 服务端 error → content JSON → 纯文本兜底。</summary>
+        public static AiTranslateResult ParseTranslateResponse(string raw)
+        {
+            var body = ParseJsonDict(raw);
+            if (body == null)
+            {
+                var plainRaw = StripCodeFence((raw ?? "").Trim(), AnyFencePattern).Trim();
+                return plainRaw.Length > 0
+                    ? new AiTranslateResult { Translation = plainRaw }
+                    : new AiTranslateResult { Error = "AI 返回为空" };
+            }
+
+            var detail = ErrorText(body);
+            if (detail.Length > 0) return new AiTranslateResult { Error = detail };
+
+            var direct = Str(Get(body, "translation"));
+            if (direct.Trim().Length > 0)
+                return new AiTranslateResult { Translation = direct.Trim(), DetectedLang = Str(Get(body, "detectedLang")).Trim() };
+
+            var choices = AsArray(Get(body, "choices"));
+            var choice = choices != null && choices.Length > 0 ? AsDict(choices[0]) : null;
+            var message = choice != null ? AsDict(Get(choice, "message")) : null;
+            var content = message != null ? Str(Get(message, "content")) : "";
+            if (content.Trim().Length == 0) return new AiTranslateResult { Error = "AI 返回内容为空" };
+
+            var parsed = ParseJsonDict(StripCodeFence(content, JsonFencePattern)) ?? ParseJsonDict(ExtractJsonObject(content));
+            if (parsed != null)
+            {
+                var translation = Str(Get(parsed, "translation")).Trim();
+                if (translation.Length > 0)
+                    return new AiTranslateResult { Translation = translation, DetectedLang = Str(Get(parsed, "detectedLang")).Trim() };
+                var reason = Str(Get(parsed, "error")).Trim();
+                return new AiTranslateResult { Error = reason.Length > 0 ? reason : "AI 未返回译文" };
+            }
+
+            // 纯文本兜底：模型忽略 JSON 要求但正文是有效译文，白跑一次请求太亏（与 OCR 同口径）
+            var plain = StripCodeFence(content, AnyFencePattern).Trim();
+            return plain.Length > 0
+                ? new AiTranslateResult { Translation = plain }
+                : new AiTranslateResult { Error = "AI 未返回译文" };
         }
 
         // ---- 响应解析（v1 parseResponseBody 语义，全部离线）----

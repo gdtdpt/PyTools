@@ -36,6 +36,7 @@ namespace PyTools
         private EncodeView _encodeView;
         private CronView _cronView;
         private RegexView _regexView;
+        private TranslateView _translateView;
         private DiffWindow _diffWindow; // 独立常驻窗口（M4 diff）：不寄居呼出壳，关闭即销毁
         private OcrWindow _ocrWindow;   // 独立常驻窗口（M4 ai-ocr）：与 diff 同族，多窗并存互不干扰
         private ClipboardHistory _clipHistory;
@@ -189,6 +190,10 @@ namespace PyTools
                 _regexView = new RegexView();
                 if (_view != null) _regexView.Margin = _view.Margin;
 
+                // AI 翻译视图（M4 AI 批）：工具固定尺寸模式（900×620，双栏对照）
+                _translateView = new TranslateView();
+                if (_view != null) _translateView.Margin = _view.Margin;
+
                 _clipWatcher = new ClipboardWatcher(OnClipboardUpdate);
                 if (!_clipWatcher.Start()) Logger.Error("clipboard watcher failed to start");
 
@@ -235,6 +240,12 @@ namespace PyTools
                     if (ReferenceEquals(content, _regexView))
                     {
                         if (_regexView.TryExitActionMode()) return;
+                        ShowSummon();
+                        return;
+                    }
+                    if (ReferenceEquals(content, _translateView))
+                    {
+                        if (_translateView.TryExitActionMode()) return;
                         ShowSummon();
                         return;
                     }
@@ -289,6 +300,7 @@ namespace PyTools
                     else if (args.Contains("--encode")) ShowEncode();
                     else if (args.Contains("--cron")) ShowCron();
                     else if (args.Contains("--regex")) ShowRegex();
+                    else if (args.Contains("--translate")) ShowTranslate();
                     else if (args.Contains("--diff"))
                     {
                         // 预载必须挂到开窗回调里：窗口要到壳隐藏后才创建
@@ -316,6 +328,7 @@ namespace PyTools
                     else if (args.Contains("--format")) { /* 编辑区无查询语义 */ }
                     else if (args.Contains("--cron")) _cronView.ExprBox.Text = _debugQuery;
                     else if (args.Contains("--regex")) { _regexView.ExprBox.Text = _debugQuery; }
+                    else if (args.Contains("--translate")) { _translateView.SourceBox.Text = _debugQuery; }
                     else _view.SearchBox.Text = _debugQuery;
                     }
                 }
@@ -470,6 +483,12 @@ namespace PyTools
         private void ShowRegex()
         {
             ShowShell(_regexView, _regexView.ResetForRegex, "regex", new Size(860, 620));
+        }
+
+        /// <summary>AI 翻译视图（M4 AI 批）：由启动器内置命令条目进入；固定尺寸模式（900×620，双栏对照）。</summary>
+        private void ShowTranslate()
+        {
+            ShowShell(_translateView, _translateView.ResetForTranslate, "translate", new Size(900, 620));
         }
 
         /// <summary>
@@ -1073,6 +1092,7 @@ namespace PyTools
                 else if (string.Equals(entry.CommandId, "encode", StringComparison.OrdinalIgnoreCase)) ShowEncode();
                 else if (string.Equals(entry.CommandId, "cron", StringComparison.OrdinalIgnoreCase)) ShowCron();
                 else if (string.Equals(entry.CommandId, "regex", StringComparison.OrdinalIgnoreCase)) ShowRegex();
+                else if (string.Equals(entry.CommandId, "translate", StringComparison.OrdinalIgnoreCase)) ShowTranslate();
                 else if (string.Equals(entry.CommandId, "diff", StringComparison.OrdinalIgnoreCase)) ShowDiff();
                 else if (string.Equals(entry.CommandId, "ocr", StringComparison.OrdinalIgnoreCase)) ShowOcr();
                 else if (string.Equals(entry.CommandId, "format-clipboard", StringComparison.OrdinalIgnoreCase)) RunFormatClipboardAction();

@@ -91,6 +91,14 @@ namespace PyTools.Core
             },
             new BuiltinCommand
             {
+                Id = "translate",
+                Kind = "view",
+                Title = "AI 翻译",
+                Subtitle = "中英日互译，支持自动识别语种",
+                Aliases = new[] { "fanyi", "翻译" }
+            },
+            new BuiltinCommand
+            {
                 Id = "format-clipboard",
                 Kind = "action",
                 Title = "格式化剪贴板",

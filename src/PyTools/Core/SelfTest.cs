@@ -1259,6 +1259,49 @@ namespace PyTools.Core
                 return null;
             }));
 
+            // ---- AI 翻译（ai-translate，M4 AI 批第三消费者；离线部分）----
+
+            results.Add(Test("AiClient：翻译请求体（纯文本 content、无 tools、temperature 0）", () =>
+            {
+                var cfg = new AiClient.AiLocalConfig { Model = "m1", BaseUrl = "http://x", ApiKey = "k" };
+                var serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+                var json = serializer.Serialize(AiClient.BuildTranslatePayload(cfg, "", "zh-CN", "hello"));
+                // user 字典作为字符串塞进 content，内层引号被转义（\"）：断言按转义后的形态匹配
+                if (!json.Contains("sourceLang\\\":\\\"\\\"")) return "源语言未知应传空串（由模型自判）";
+                if (!json.Contains("targetLang\\\":\\\"zh-CN\\\"")) return "缺 targetLang";
+                if (!json.Contains("text\\\":\\\"hello\\\"")) return "缺 text";
+                if (!json.Contains("\"temperature\":0")) return "翻译应固定 temperature=0";
+                if (json.Contains("\"tools\"")) return "翻译不应带 tools";
+                if (!json.Contains("\"model\":\"m1\"")) return "缺 model";
+                return null;
+            }));
+
+            results.Add(Test("AiClient：翻译响应解析（content JSON / 围栏 / detectedLang / 纯文本兜底 / error）", () =>
+            {
+                var direct = AiClient.ParseTranslateResponse("{\"choices\":[{\"message\":{\"content\":\"{\\\"translation\\\":\\\"你好\\\",\\\"detectedLang\\\":\\\"en\\\"}\"}}]}");
+                if (direct.Translation != "你好") return "content JSON 解析失败: " + direct.Error;
+                if (direct.DetectedLang != "en") return "detectedLang 未透出: " + direct.DetectedLang;
+
+                var fenced = AiClient.ParseTranslateResponse("{\"choices\":[{\"message\":{\"content\":\"```json\\n{\\\"translation\\\":\\\"第二行\\\"}\\n```\"}}]}");
+                if (fenced.Translation != "第二行") return "围栏 JSON 未解析: " + fenced.Error;
+
+                var plain = AiClient.ParseTranslateResponse("{\"choices\":[{\"message\":{\"content\":\"模型直接吐了译文\"}}]}");
+                if (plain.Translation != "模型直接吐了译文") return "纯文本兜底失效: " + plain.Error;
+
+                var modelError = AiClient.ParseTranslateResponse("{\"choices\":[{\"message\":{\"content\":\"{\\\"translation\\\":\\\"\\\",\\\"error\\\":\\\"原文为空\\\"}\"}}]}");
+                if (modelError.Translation.Length > 0 || modelError.Error != "原文为空") return "模型 error 字段未透出: " + modelError.Error;
+
+                var serverError = AiClient.ParseTranslateResponse("{\"error\":{\"message\":\"余额不足\"}}");
+                if (serverError.Error != "余额不足") return "服务端 error 未透出";
+
+                var notJson = AiClient.ParseTranslateResponse("整段非 JSON 的译文");
+                if (notJson.Translation != "整段非 JSON 的译文") return "非 JSON 整段兜底失效";
+
+                var empty = AiClient.ParseTranslateResponse("{\"choices\":[{\"message\":{\"content\":\"\"}}]}");
+                if (empty.Error.Length == 0) return "空内容应报错";
+                return null;
+            }));
+
             results.Add(Test("OcrImage：文件白名单 + 大小上限 + 解码校验", () =>
             {
                 var dir = TempClipDir();
