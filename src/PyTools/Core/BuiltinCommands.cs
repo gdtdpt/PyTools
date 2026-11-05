@@ -83,6 +83,14 @@ namespace PyTools.Core
             },
             new BuiltinCommand
             {
+                Id = "ocr",
+                Kind = "view", // 打开独立常驻窗口（与 diff 同族），仍属「工具入口」语义
+                Title = "图片文字识别",
+                Subtitle = "截图或图片 → AI 提取文字",
+                Aliases = new[] { "ocr", "识别" }
+            },
+            new BuiltinCommand
+            {
                 Id = "format-clipboard",
                 Kind = "action",
                 Title = "格式化剪贴板",

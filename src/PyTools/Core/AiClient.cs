@@ -30,11 +30,13 @@ namespace PyTools.Core
         }
         private static readonly Regex FencePattern = new Regex("```(?:regex)?\\s*([\\s\\S]*?)```", RegexOptions.IgnoreCase);
         private static readonly Regex JsonFencePattern = new Regex("```(?:json)?\\s*([\\s\\S]*?)```", RegexOptions.IgnoreCase);
+        private static readonly Regex AnyFencePattern = new Regex("```[a-zA-Z]*\\s*([\\s\\S]*?)```", RegexOptions.IgnoreCase);
         private static readonly Regex InlinePattern = new Regex("^\\s*(?:regex\\s*)?((?:\\^|\\$|\\[|\\\\|\\())[\\s\\S]+$", RegexOptions.IgnoreCase);
         private static readonly string[] FlagNames = { "g", "i", "m", "s" };
 
         private const int RequestTimeoutMs = 30000;
         private const int ModelsTimeoutMs = 15000;
+        private const int OcrTimeoutMs = 60000; // OCR 图大、推理慢，v1 同口径 60s
 
         private const string SystemPrompt =
             "你是内网里的正则表达式助手。根据用户给出的自然语言目标或样例文本，生成最合适的正则表达式。\n" +
@@ -342,6 +344,125 @@ namespace PyTools.Core
                 };
             }
             return payload;
+        }
+
+        // ---- 图片文字识别（v1 ai-ocr 语义，M4 AI 批第二个消费者）----
+
+        /// <summary>
+        /// OCR 专用提示词（v1 OCR_PROMPT 语义 + v2 纯文本兜底口径）：
+        /// 要求只回 JSON {text,error}，但模型直接吐纯文本时调用侧也接受（拍板 #1）。
+        /// </summary>
+        private const string OcrPrompt =
+            "你是内网里的图片文字识别助手。请逐字识别用户图片中的全部文字，保持原有换行与表格对齐（用空格对齐列）。\n" +
+            "只输出一个 JSON 对象，不要输出 Markdown、代码块或解释性文字。JSON 字段:\n" +
+            "- text: 识别到的全部文字（原样保留换行）\n" +
+            "- error: 识别失败时的简短中文原因；成功留空";
+
+        public sealed class AiOcrResult
+        {
+            public bool Ok;
+            public string Text = "";
+            public string Model = "";
+            public string Error = "";
+            public bool RequestFailed;    // 请求类失败（超时/网络/HTTP）→ UI 提示可在设置中更换模型
+        }
+
+        public static Task<AiOcrResult> OcrAsync(string dataUrl)
+        {
+            return Task.Run(delegate { return Ocr(dataUrl); });
+        }
+
+        public static AiOcrResult Ocr(string dataUrl, string dir = null)
+        {
+            var d = Dir(dir);
+            var status = Status(d);
+            if (!status.Available) return new AiOcrResult { Error = status.Reason };
+            if (string.IsNullOrEmpty(dataUrl)) return new AiOcrResult { Error = "没有可识别的图片" };
+
+            var cfg = LoadConfig(d);
+            AiOcrResult parsed;
+            try
+            {
+                var raw = Request(cfg, cfg.BaseUrl, "POST", Serialize(BuildOcrPayload(cfg, dataUrl)), OcrTimeoutMs);
+                parsed = ParseOcrResponse(raw);
+            }
+            catch (WebException wex)
+            {
+                return new AiOcrResult { Error = RequestErrorText(wex, OcrTimeoutMs), RequestFailed = true };
+            }
+            catch (Exception ex)
+            {
+                return new AiOcrResult { Error = ex.Message, RequestFailed = true };
+            }
+
+            if (parsed.Error.Length > 0) return parsed;
+            parsed.Ok = true;
+            parsed.Model = cfg.Model;
+            return parsed;
+        }
+
+        /// <summary>OCR 请求体：图文混合 content 数组（离线可测；不含 tools）。</summary>
+        internal static Dictionary<string, object> BuildOcrPayload(AiLocalConfig cfg, string dataUrl)
+        {
+            var userContent = new object[]
+            {
+                new Dictionary<string, object> { { "type", "text" }, { "text", "请识别这张图片里的全部文字。" } },
+                new Dictionary<string, object>
+                {
+                    { "type", "image_url" },
+                    { "image_url", new Dictionary<string, object> { { "url", dataUrl } } },
+                },
+            };
+            var payload = new Dictionary<string, object>
+            {
+                {
+                    "messages", new object[]
+                    {
+                        new Dictionary<string, object> { { "role", "system" }, { "content", OcrPrompt } },
+                        new Dictionary<string, object> { { "role", "user" }, { "content", userContent } },
+                    }
+                },
+                { "temperature", 0 }, // 识别要稳定复现，不引入采样随机性
+            };
+            if (cfg.Model.Length > 0) payload["model"] = cfg.Model;
+            if (cfg.MaxTokens.HasValue) payload["max_tokens"] = cfg.MaxTokens.Value;
+            return payload;
+        }
+
+        /// <summary>OCR 响应解析（离线可测）：直返 text → 服务端 error → content JSON → 纯文本兜底。</summary>
+        public static AiOcrResult ParseOcrResponse(string raw)
+        {
+            var body = ParseJsonDict(raw);
+            if (body == null)
+            {
+                var plainRaw = StripCodeFence((raw ?? "").Trim(), AnyFencePattern).Trim();
+                return plainRaw.Length > 0 ? new AiOcrResult { Text = plainRaw } : new AiOcrResult { Error = "AI 返回为空" };
+            }
+
+            var detail = ErrorText(body);
+            if (detail.Length > 0) return new AiOcrResult { Error = detail };
+
+            var direct = Str(Get(body, "text"));
+            if (direct.Trim().Length > 0) return new AiOcrResult { Text = direct.Trim() };
+
+            var choices = AsArray(Get(body, "choices"));
+            var choice = choices != null && choices.Length > 0 ? AsDict(choices[0]) : null;
+            var message = choice != null ? AsDict(Get(choice, "message")) : null;
+            var content = message != null ? Str(Get(message, "content")) : "";
+            if (content.Trim().Length == 0) return new AiOcrResult { Error = "AI 返回内容为空" };
+
+            var parsed = ParseJsonDict(StripCodeFence(content, JsonFencePattern)) ?? ParseJsonDict(ExtractJsonObject(content));
+            if (parsed != null)
+            {
+                var text = Str(Get(parsed, "text")).Trim();
+                if (text.Length > 0) return new AiOcrResult { Text = text };
+                var reason = Str(Get(parsed, "error")).Trim();
+                return new AiOcrResult { Error = reason.Length > 0 ? reason : "AI 未识别出文字" };
+            }
+
+            // 纯文本兜底：模型忽略了 JSON 要求但正文有效，白跑一次请求太亏（拍板 #1）
+            var plain = StripCodeFence(content, AnyFencePattern).Trim();
+            return plain.Length > 0 ? new AiOcrResult { Text = plain } : new AiOcrResult { Error = "AI 未识别出文字" };
         }
 
         // ---- 响应解析（v1 parseResponseBody 语义，全部离线）----

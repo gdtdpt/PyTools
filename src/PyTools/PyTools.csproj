@@ -97,6 +97,10 @@
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>
+    <Page Include="Views\OcrWindow.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
     <Page Include="Windows\SummonWindow.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
@@ -142,6 +146,7 @@
     <Compile Include="Core\RegexTester.cs" />
     <Compile Include="Core\DiffEngine.cs" />
     <Compile Include="Core\AiClient.cs" />
+    <Compile Include="Core\OcrImage.cs" />
     <Compile Include="Core\TextFileLoader.cs" />
     <Compile Include="Native\NativeMethods.cs" />
     <Compile Include="Native\HotkeyParser.cs" />
@@ -191,6 +196,10 @@
     </Compile>
     <Compile Include="Views\DiffWindow.xaml.cs">
       <DependentUpon>DiffWindow.xaml</DependentUpon>
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="Views\OcrWindow.xaml.cs">
+      <DependentUpon>OcrWindow.xaml</DependentUpon>
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="Views\DiffTextBlock.cs" />

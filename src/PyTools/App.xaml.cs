@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Diagnostics;
 using System.IO;
+using System.Collections.Generic;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Windows;
@@ -36,6 +37,7 @@ namespace PyTools
         private CronView _cronView;
         private RegexView _regexView;
         private DiffWindow _diffWindow; // 独立常驻窗口（M4 diff）：不寄居呼出壳，关闭即销毁
+        private OcrWindow _ocrWindow;   // 独立常驻窗口（M4 ai-ocr）：与 diff 同族，多窗并存互不干扰
         private ClipboardHistory _clipHistory;
         private ClipboardWatcher _clipWatcher;
         private bool _clipboardRegistered;
@@ -46,6 +48,8 @@ namespace PyTools
         private string _debugQuery;   // --debug 配套 --query=<词>：呼出即预填搜索（UI 截图自验用）
         private string _debugDiffLeft;  // --diff-left=<路径>：diff 窗口预载左文件（截图自验用）
         private string _debugDiffRight; // --diff-right=<路径>：diff 窗口预载右文件
+        private string _debugOcrImage;  // --ocr-image=<路径>：ocr 窗口预载图片（截图自验用）
+        private string _debugClipDump;  // --ocr-clip-dump=<路径>：把剪贴板 PNG 流原始字节落盘（诊断渲染问题用，写完即退）
         private string _bootAddApp;   // 冷启动 --add-app=<路径>：静默驻留，不呼出窗口
         private IntPtr _hotkeyHwnd = IntPtr.Zero;
         private HwndSource _hotkeySource;
@@ -88,6 +92,14 @@ namespace PyTools
                 else if (arg.StartsWith("--diff-right=", StringComparison.Ordinal))
                 {
                     _debugDiffRight = arg.Substring("--diff-right=".Length);
+                }
+                else if (arg.StartsWith("--ocr-image=", StringComparison.Ordinal))
+                {
+                    _debugOcrImage = arg.Substring("--ocr-image=".Length);
+                }
+                else if (arg.StartsWith("--ocr-clip-dump=", StringComparison.Ordinal))
+                {
+                    _debugClipDump = arg.Substring("--ocr-clip-dump=".Length);
                 }
             }
             _bootAddApp = ExtractAddAppArg(args); // 空串 = 带参数但值无效；null = 未带参数
@@ -266,6 +278,11 @@ namespace PyTools
                 if (debug)
                 {
                     // 调试模式：启动即显示且禁用失焦隐藏（与 v1 --debug 语义一致）
+                    if (_debugClipDump != null)
+                    {
+                        DumpClipboardForOcr(_debugClipDump); // 诊断：落盘剪贴板字节后直接退出
+                        return;
+                    }
                     if (args.Contains("--clipboard")) ShowClipboard();
                     else if (args.Contains("--vsc")) ShowVsc();
                     else if (args.Contains("--format")) ShowFormat();
@@ -281,6 +298,15 @@ namespace PyTools
                         });
                     }
                     else if (args.Contains("--settings")) OpenSettings(); // 调试/自验开关：启动即开设置窗口
+                    else if (args.Contains("--ocr"))
+                    {
+                        // --ocr-image=<路径> 预载图片；--ocr-demo 直接填一段示例结果并进缩略态（截图自验用）
+                        ShowOcr(delegate
+                        {
+                            if (_ocrWindow != null)
+                                _ocrWindow.DebugPreload(_debugOcrImage, args.Contains("--ocr-demo") ? OcrDemoText : null);
+                        });
+                    }
                     else ShowSummon();
                     if (_debugQuery != null)
                     {
@@ -309,6 +335,10 @@ namespace PyTools
                 throw;
             }
         }
+
+        /// <summary>--ocr-demo 用的示例识别结果（截图自验：免真实请求也能看到缩略态与信息卡）。</summary>
+        private const string OcrDemoText =
+            "月度对账说明\r\n\r\n本月对账工作于 11 月 3 日完成，共核对 128 笔交易，\r\n其中 3 笔存在金额差异，已提交财务复核。\r\n\r\n编号            金额          状态\r\nTXN-20261103    12,480.00     已核对\r\nTXN-20261104     8,300.00     待复核\r\nTXN-20261105     4,150.00     已核对";
 
         private void ApplyTheme(bool liteMode)
         {
@@ -467,6 +497,69 @@ namespace PyTools
             HideSummon(restoreFocus: false);
             Logger.Info("diff window opened");
             if (afterOpen != null) afterOpen();
+        }
+
+        /// <summary>
+        /// 图片文字识别（M4 AI 批第二项）：**独立常驻窗口**（与 diff 同族，2026-11-05 拍板）。
+        /// 与 diff 并存的场景 = 两个工具窗口同时开着：多次从启动器进入只激活已有窗口、保留当前图片与结果；
+        /// 关闭即结束一次识别工作，不新建第二个。层叠偏移避免两窗中心完全重叠。
+        /// </summary>
+        private void ShowOcr(Action afterOpen = null)
+        {
+            if (_ocrWindow != null)
+            {
+                _ocrWindow.Activate();
+                if (afterOpen != null) afterOpen();
+                return;
+            }
+
+            var ocr = new OcrWindow();
+            ocr.ApplyCascade(CascadeSteps());
+            _ocrWindow = ocr;
+            ocr.Closed += delegate { _ocrWindow = null; };
+            // 顺序同 diff：先 Show+Activate 拿前台，再收壳（反过来前台会落到进程内隐藏的消息窗口）
+            ocr.Show();
+            ocr.Activate();
+            HideSummon(restoreFocus: false);
+            Logger.Info("ocr window opened");
+            if (afterOpen != null) afterOpen();
+        }
+
+        /// <summary>层叠偏移档数：已打开的独立工具/设置窗口各占一档（最多 2 档，避免顶到屏幕边缘）。</summary>
+        private int CascadeSteps()
+        {
+            var count = 0;
+            if (_diffWindow != null) count++;
+            if (_settingsWindow != null) count++;
+            return Math.Min(count, 2);
+        }
+
+        /// <summary>
+        /// 诊断用：走 OcrImage.FromClipboard 同一条链路，把拿到的原始字节与元信息落盘后退出。
+        /// 沙箱里 OpenClipboard 被禁，只能借本进程读剪贴板，定位「渲染空白」类问题。
+        /// </summary>
+        private void DumpClipboardForOcr(string path)
+        {
+            var record = PyTools.Core.OcrImage.FromClipboard();
+            var lines = new List<string>
+            {
+                "ok=" + record.Ok,
+                "mime=" + record.Mime,
+                "size=" + record.Width + "x" + record.Height,
+                "bytes=" + record.ByteCount,
+                "error=" + record.Error,
+            };
+            try
+            {
+                var data = Clipboard.GetDataObject();
+                if (data != null) lines.Add("formats=" + string.Join(",", data.GetFormats()));
+            }
+            catch (Exception ex) { lines.Add("formats-error=" + ex.Message); }
+            File.WriteAllLines(path + ".txt", lines);
+            if (record.Ok && record.Bytes != null && record.Bytes.Length > 0)
+                File.WriteAllBytes(path, record.Bytes);
+            Logger.Info("ocr clip dump: " + string.Join(" | ", lines));
+            Shutdown(0);
         }
 
         private void ShowClipboard()
@@ -981,6 +1074,7 @@ namespace PyTools
                 else if (string.Equals(entry.CommandId, "cron", StringComparison.OrdinalIgnoreCase)) ShowCron();
                 else if (string.Equals(entry.CommandId, "regex", StringComparison.OrdinalIgnoreCase)) ShowRegex();
                 else if (string.Equals(entry.CommandId, "diff", StringComparison.OrdinalIgnoreCase)) ShowDiff();
+                else if (string.Equals(entry.CommandId, "ocr", StringComparison.OrdinalIgnoreCase)) ShowOcr();
                 else if (string.Equals(entry.CommandId, "format-clipboard", StringComparison.OrdinalIgnoreCase)) RunFormatClipboardAction();
                 return;
             }
@@ -1206,6 +1300,7 @@ namespace PyTools
                 if (_hotkeySource != null) _hotkeySource.Dispose();
                 if (_clipWatcher != null) _clipWatcher.Dispose();
                 if (_diffWindow != null) _diffWindow.Close(); // 常驻工具窗口随托盘退出一并关闭
+                if (_ocrWindow != null) _ocrWindow.Close();
                 if (_window != null && _window.IsVisible)
                 {
                     if (_toolSizeMode) SnapRestoreBounds(); // 工具尺寸模式：退出前还原，位置记忆不被污染

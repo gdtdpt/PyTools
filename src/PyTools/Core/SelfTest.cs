@@ -1218,6 +1218,120 @@ namespace PyTools.Core
                 }
             }));
 
+            // ---- AI 图片识别（ai-ocr，M4 AI 批第二消费者；离线部分）----
+
+            results.Add(Test("AiClient：OCR 请求体（图文 content 数组、无 tools、temperature 0）", () =>
+            {
+                var cfg = new AiClient.AiLocalConfig { Model = "m1", BaseUrl = "http://x", ApiKey = "k", MaxTokens = 2048 };
+                var serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+                var json = serializer.Serialize(AiClient.BuildOcrPayload(cfg, "data:image/png;base64,AAAA"));
+                if (!json.Contains("\"image_url\"")) return "缺 image_url 内容块";
+                if (!json.Contains("data:image/png;base64,AAAA")) return "dataUrl 未原样进入请求";
+                if (!json.Contains("\"temperature\":0")) return "OCR 应固定 temperature=0";
+                if (json.Contains("\"tools\"")) return "OCR 不应带 tools";
+                if (!json.Contains("\"model\":\"m1\"")) return "缺 model";
+                if (!json.Contains("\"max_tokens\":2048")) return "缺 max_tokens";
+                return null;
+            }));
+
+            results.Add(Test("AiClient：OCR 响应解析（content JSON / 围栏 / 纯文本兜底 / error）", () =>
+            {
+                var direct = AiClient.ParseOcrResponse("{\"choices\":[{\"message\":{\"content\":\"{\\\"text\\\":\\\"发票号 1234\\\"}\"}}]}");
+                if (direct.Text != "发票号 1234") return "content JSON 解析失败: " + direct.Error;
+
+                var fenced = AiClient.ParseOcrResponse("{\"choices\":[{\"message\":{\"content\":\"```json\\n{\\\"text\\\":\\\"第二行\\\"}\\n```\"}}]}");
+                if (fenced.Text != "第二行") return "围栏 JSON 未解析: " + fenced.Error;
+
+                var plain = AiClient.ParseOcrResponse("{\"choices\":[{\"message\":{\"content\":\"模型直接吐了纯文本\"}}]}");
+                if (plain.Text != "模型直接吐了纯文本") return "纯文本兜底失效: " + plain.Error;
+
+                var modelError = AiClient.ParseOcrResponse("{\"choices\":[{\"message\":{\"content\":\"{\\\"text\\\":\\\"\\\",\\\"error\\\":\\\"图片过于模糊\\\"}\"}}]}");
+                if (modelError.Text.Length > 0 || modelError.Error != "图片过于模糊") return "模型 error 字段未透出: " + modelError.Error;
+
+                var serverError = AiClient.ParseOcrResponse("{\"error\":{\"message\":\"余额不足\"}}");
+                if (serverError.Error != "余额不足") return "服务端 error 未透出";
+
+                var notJson = AiClient.ParseOcrResponse("整段非 JSON 的识别正文");
+                if (notJson.Text != "整段非 JSON 的识别正文") return "非 JSON 整段兜底失效";
+
+                var empty = AiClient.ParseOcrResponse("{\"choices\":[{\"message\":{\"content\":\"\"}}]}");
+                if (empty.Error.Length == 0) return "空内容应报错";
+                return null;
+            }));
+
+            results.Add(Test("OcrImage：文件白名单 + 大小上限 + 解码校验", () =>
+            {
+                var dir = TempClipDir();
+                try
+                {
+                    var pngPath = Path.Combine(dir, "shot.png");
+                    File.WriteAllBytes(pngPath, MakePngBytes());
+                    var ok = OcrImage.FromFile(pngPath);
+                    if (!ok.Ok) return "合法 png 应可装载: " + ok.Error;
+                    if (ok.Width != 2 || ok.Height != 2) return "尺寸读取错误: " + ok.Width + "x" + ok.Height;
+                    if (ok.Mime != "image/png") return "mime 应为 image/png";
+                    if (!ok.DataUrl.StartsWith("data:image/png;base64,")) return "dataUrl 前缀错误";
+
+                    var gifPath = Path.Combine(dir, "x.gif");
+                    File.WriteAllBytes(gifPath, MakePngBytes());
+                    if (OcrImage.FromFile(gifPath).Ok) return "非白名单扩展名应拒绝";
+
+                    var broken = Path.Combine(dir, "broken.jpg");
+                    File.WriteAllText(broken, "not an image");
+                    if (OcrImage.FromFile(broken).Ok) return "损坏图片应拒绝";
+
+                    if (OcrImage.FromFile(Path.Combine(dir, "missing.png")).Ok) return "不存在的文件应拒绝";
+                    if (OcrImage.FromFile(dir).Ok) return "文件夹应拒绝";
+
+                    var big = new byte[OcrImage.MaxBytes + 1];
+                    if (OcrImage.FromBytes(big, "image/png").Ok) return "超过 10MB 应拒绝";
+                    return null;
+                }
+                finally { TryDeleteDir(dir); }
+            }));
+
+            results.Add(Test("OcrImage：DIB 死 alpha（全 0）自动展平为不透明", () =>
+            {
+                // 复刻剪贴板 GetImage() 兜底链的产物：Bgra32 且 alpha 全 0（GDI 截图工具不写 alpha 字节）。
+                // 修复前：解码正常但渲染全透明（「载入成功但卡片空白」）；修复后：应自动展平为 Bgr32。
+                var source = new System.Windows.Media.Imaging.WriteableBitmap(3, 2, 96, 96,
+                    System.Windows.Media.PixelFormats.Bgra32, null);
+                var pixels = new byte[3 * 2 * 4];
+                for (int i = 0; i < pixels.Length; i += 4) { pixels[i] = 30; pixels[i + 1] = 60; pixels[i + 2] = 200; }
+                source.WritePixels(new System.Windows.Int32Rect(0, 0, 3, 2), pixels, 3 * 4, 0);
+                var encoder = new PngBitmapEncoder();
+                encoder.Frames.Add(BitmapFrame.Create(source));
+                byte[] deadAlphaPng;
+                using (var ms = new MemoryStream()) { encoder.Save(ms); deadAlphaPng = ms.ToArray(); }
+
+                var fixedRecord = OcrImage.FromBytes(deadAlphaPng, "image/png");
+                if (!fixedRecord.Ok) return "死 alpha 图应修复后通过: " + fixedRecord.Error;
+                if (fixedRecord.Width != 3 || fixedRecord.Height != 2) return "尺寸应保持 3x2";
+
+                var frame = BitmapDecoder.Create(new MemoryStream(fixedRecord.Bytes),
+                    BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad).Frames[0];
+                // WPF 转换可能选 Bgr32 或 Bgr24，只要无 alpha 通道即视为展平成功
+                if (frame.Format != System.Windows.Media.PixelFormats.Bgr32
+                    && frame.Format != System.Windows.Media.PixelFormats.Bgr24)
+                {
+                    return "应展平为无 alpha 格式，实际 " + frame.Format;
+                }
+
+                var bitmap = fixedRecord.ToBitmap();
+                if (bitmap == null) return "修复后应可生成预览位图";
+                if (bitmap.Format == System.Windows.Media.PixelFormats.Bgra32
+                    || bitmap.Format == System.Windows.Media.PixelFormats.Pbgra32)
+                {
+                    return "预览位图仍带 alpha 通道: " + bitmap.Format;
+                }
+
+                // 正常带 alpha 的 PNG（alpha=255）不得被误伤
+                var normalRecord = OcrImage.FromBytes(MakePngBytes(), "image/png");
+                if (!normalRecord.Ok) return "正常 png 应通过: " + normalRecord.Error;
+                if (normalRecord.Bytes.Length != MakePngBytes().Length) return "正常 png 不应被重编码";
+                return null;
+            }));
+
             var failed = 0;
             var lines = new List<string>();
             foreach (var r in results)
