@@ -13,7 +13,67 @@
       文件装载三入口（框上无按钮，用户拍板）：拖入 / 单击弹选择框 / 鼠标悬停该侧按 Ctrl+V。
     -->
     <Window.Resources>
-        <!-- 左侧行：行号列（左缘 3px 状态条）+ 行内容 -->
+        <!-- 左侧行号列（冻结列，2026-11-04 拍板）：不横滚，垂直滚动经 ScrollChanged 与内容列同步；
+             横滚超长行时行号钉在左缘。3px 状态条语义与内容行共用同一 Row 数据。 -->
+        <DataTemplate x:Key="LeftGutterTemplate">
+            <!-- MinWidth=46：ItemContainerStyle 的 HorizontalContentAlignment=Left 会把 ContentPresenter
+                 收缩到内容宽，靠 MinWidth 铺满 46px 列（与内容行 MinWidth 绑定同性质） -->
+            <Border MinWidth="46" Height="22" BorderThickness="3,0,1,0">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="Background" Value="{DynamicResource Diff.Gutter.Bg}"/>
+                        <Setter Property="BorderBrush" Value="{DynamicResource Diff.Gutter.Equal}"/>
+                        <Style.Triggers>
+                            <!-- Background/BorderBrush 必须走 Style：局部值会压过触发器（项目已知坑） -->
+                            <DataTrigger Binding="{Binding Kind}" Value="Change">
+                                <Setter Property="BorderBrush" Value="{DynamicResource Diff.Marker.Changed}"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding Kind}" Value="Delete">
+                                <Setter Property="BorderBrush" Value="{DynamicResource Text.Error}"/>
+                            </DataTrigger>
+                            <!-- 放最后：覆盖差异标记色（同属性后者胜） -->
+                            <DataTrigger Binding="{Binding IsFocused}" Value="True">
+                                <Setter Property="Background" Value="{DynamicResource Diff.Focus.Bg}"/>
+                                <Setter Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
+                <TextBlock Text="{Binding LeftNumberText}" FontSize="11" Margin="0,0,6,0"
+                           HorizontalAlignment="Right" VerticalAlignment="Center"
+                           Foreground="{DynamicResource Text.Secondary}"/>
+            </Border>
+        </DataTemplate>
+
+        <!-- 右侧行号列：结构镜像，状态条语义相反（增行绿、对面删行淡红） -->
+        <DataTemplate x:Key="RightGutterTemplate">
+            <Border MinWidth="46" Height="22" BorderThickness="3,0,1,0">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="Background" Value="{DynamicResource Diff.Gutter.Bg}"/>
+                        <Setter Property="BorderBrush" Value="{DynamicResource Diff.Gutter.Equal}"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding Kind}" Value="Change">
+                                <Setter Property="BorderBrush" Value="{DynamicResource Diff.Marker.Changed}"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding Kind}" Value="Insert">
+                                <Setter Property="BorderBrush" Value="{DynamicResource Text.Success}"/>
+                            </DataTrigger>
+                            <!-- 放最后：覆盖差异标记色（同属性后者胜） -->
+                            <DataTrigger Binding="{Binding IsFocused}" Value="True">
+                                <Setter Property="Background" Value="{DynamicResource Diff.Focus.Bg}"/>
+                                <Setter Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
+                <TextBlock Text="{Binding RightNumberText}" FontSize="11" Margin="0,0,6,0"
+                           HorizontalAlignment="Right" VerticalAlignment="Center"
+                           Foreground="{DynamicResource Text.Secondary}"/>
+            </Border>
+        </DataTemplate>
+
+        <!-- 左侧行：行内容（行号列已拆出为冻结列 LeftGutterTemplate，横滚时行号钉左） -->
         <DataTemplate x:Key="LeftRowTemplate">
             <Grid Height="22" MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}">
                 <Grid.Style>
@@ -33,36 +93,7 @@
                         </Style.Triggers>
                     </Style>
                 </Grid.Style>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="46"/>
-                    <ColumnDefinition Width="*"/>
-                </Grid.ColumnDefinitions>
-                <Border Grid.Column="0" BorderThickness="3,0,1,0">
-                    <Border.Style>
-                        <Style TargetType="Border">
-                            <Setter Property="Background" Value="{DynamicResource Diff.Gutter.Bg}"/>
-                            <Setter Property="BorderBrush" Value="{DynamicResource Diff.Gutter.Equal}"/>
-                            <Style.Triggers>
-                                <!-- Background 必须走 Style：局部值会压过触发器（项目已知坑） -->
-                                <DataTrigger Binding="{Binding Kind}" Value="Change">
-                                    <Setter Property="BorderBrush" Value="{DynamicResource Diff.Marker.Changed}"/>
-                                </DataTrigger>
-                                <DataTrigger Binding="{Binding Kind}" Value="Delete">
-                                    <Setter Property="BorderBrush" Value="{DynamicResource Text.Error}"/>
-                                </DataTrigger>
-                                <!-- 放最后：覆盖差异标记色（同属性后者胜） -->
-                                <DataTrigger Binding="{Binding IsFocused}" Value="True">
-                                    <Setter Property="Background" Value="{DynamicResource Diff.Focus.Bg}"/>
-                                    <Setter Property="BorderBrush" Value="{DynamicResource Accent}"/>
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </Border.Style>
-                    <TextBlock Text="{Binding LeftNumberText}" FontSize="11" Margin="0,0,6,0"
-                               HorizontalAlignment="Right" VerticalAlignment="Center"
-                               Foreground="{DynamicResource Text.Secondary}"/>
-                </Border>
-                <views:DiffTextBlock Grid.Column="1" Row="{Binding}" IsLeft="True"
+                <views:DiffTextBlock Row="{Binding}" IsLeft="True"
                                      FontFamily="Consolas" FontSize="12.5"
                                      Margin="8,0,6,0" VerticalAlignment="Center"
                                      TextWrapping="NoWrap" TextTrimming="None"
@@ -70,7 +101,7 @@
             </Grid>
         </DataTemplate>
 
-        <!-- 右侧行：结构镜像，状态条语义相反（增行绿、对面删行淡红） -->
+        <!-- 右侧行：结构与左侧行镜像 -->
         <DataTemplate x:Key="RightRowTemplate">
             <Grid Height="22" MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}">
                 <Grid.Style>
@@ -90,35 +121,7 @@
                         </Style.Triggers>
                     </Style>
                 </Grid.Style>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="46"/>
-                    <ColumnDefinition Width="*"/>
-                </Grid.ColumnDefinitions>
-                <Border Grid.Column="0" BorderThickness="3,0,1,0">
-                    <Border.Style>
-                        <Style TargetType="Border">
-                            <Setter Property="Background" Value="{DynamicResource Diff.Gutter.Bg}"/>
-                            <Setter Property="BorderBrush" Value="{DynamicResource Diff.Gutter.Equal}"/>
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding Kind}" Value="Change">
-                                    <Setter Property="BorderBrush" Value="{DynamicResource Diff.Marker.Changed}"/>
-                                </DataTrigger>
-                                <DataTrigger Binding="{Binding Kind}" Value="Insert">
-                                    <Setter Property="BorderBrush" Value="{DynamicResource Text.Success}"/>
-                                </DataTrigger>
-                                <!-- 放最后：覆盖差异标记色（同属性后者胜） -->
-                                <DataTrigger Binding="{Binding IsFocused}" Value="True">
-                                    <Setter Property="Background" Value="{DynamicResource Diff.Focus.Bg}"/>
-                                    <Setter Property="BorderBrush" Value="{DynamicResource Accent}"/>
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </Border.Style>
-                    <TextBlock Text="{Binding RightNumberText}" FontSize="11" Margin="0,0,6,0"
-                               HorizontalAlignment="Right" VerticalAlignment="Center"
-                               Foreground="{DynamicResource Text.Secondary}"/>
-                </Border>
-                <views:DiffTextBlock Grid.Column="1" Row="{Binding}" IsLeft="False"
+                <views:DiffTextBlock Row="{Binding}" IsLeft="False"
                                      FontFamily="Consolas" FontSize="12.5"
                                      Margin="8,0,6,0" VerticalAlignment="Center"
                                      TextWrapping="NoWrap" TextTrimming="None"
@@ -126,7 +129,8 @@
             </Grid>
         </DataTemplate>
 
-        <!-- 结果列表容器样式：固定行高 22（两栏逐行对齐的前提）+ 去选中/悬停高亮（只读视图） -->
+        <!-- 结果列表容器样式：固定行高 22（两栏逐行对齐的前提）+ 去选中/悬停高亮（只读视图）。
+             行号列与内容列的四个 ListBox 共用（模板是裸 ContentPresenter，点击行号列也无选中视觉） -->
         <Style x:Key="DiffItemStyle" TargetType="ListBoxItem">
             <Setter Property="Focusable" Value="False"/>
             <Setter Property="Padding" Value="0"/>
@@ -217,7 +221,8 @@
             </Border>
         </Grid>
 
-        <!-- 结果区：双栏并排，滚动双向同步（代码后置挂 ScrollChanged） -->
+        <!-- 结果区：每侧 = 46px 行号冻结列（不横滚）+ 内容列（横滚只滚内容，行号钉左）。
+             垂直滚动四个列表互相同步、水平只在两个内容列之间互写（代码后置挂 ScrollChanged） -->
         <Border Grid.Row="1" Margin="0,10,0,0"
                 Background="{DynamicResource Bg.Input}"
                 BorderBrush="{DynamicResource Border.Window}" BorderThickness="1">
@@ -227,27 +232,65 @@
                     <ColumnDefinition Width="1"/>
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
-                <ListBox x:Name="LeftList" Grid.Column="0" BorderThickness="0"
-                         Background="{DynamicResource Bg.Input}"
-                         ItemTemplate="{StaticResource LeftRowTemplate}"
-                         ItemContainerStyle="{StaticResource DiffItemStyle}"
-                         ScrollViewer.HorizontalScrollBarVisibility="Auto"
-                         ScrollViewer.VerticalScrollBarVisibility="Auto"
-                         VirtualizingPanel.IsVirtualizing="True"
-                         VirtualizingPanel.VirtualizationMode="Recycling"
-                         VirtualizingPanel.ScrollUnit="Pixel"
-                         SelectionMode="Single"/>
+
+                <Grid Grid.Column="0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="46"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <!-- 行号冻结列：垂直滚动条隐藏（仍可滚供同步）、水平禁用、Focusable=False
+                         （点击/键盘不进来，滚轮命中后经同步带动内容列） -->
+                    <ListBox x:Name="LeftGutterList" Grid.Column="0" BorderThickness="0"
+                             Background="{DynamicResource Bg.Input}"
+                             ItemTemplate="{StaticResource LeftGutterTemplate}"
+                             ItemContainerStyle="{StaticResource DiffItemStyle}"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             ScrollViewer.VerticalScrollBarVisibility="Hidden"
+                             VirtualizingPanel.IsVirtualizing="True"
+                             VirtualizingPanel.VirtualizationMode="Recycling"
+                             VirtualizingPanel.ScrollUnit="Pixel"
+                             SelectionMode="Single" Focusable="False"/>
+                    <ListBox x:Name="LeftList" Grid.Column="1" BorderThickness="0"
+                             Background="{DynamicResource Bg.Input}"
+                             ItemTemplate="{StaticResource LeftRowTemplate}"
+                             ItemContainerStyle="{StaticResource DiffItemStyle}"
+                             ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                             ScrollViewer.VerticalScrollBarVisibility="Auto"
+                             VirtualizingPanel.IsVirtualizing="True"
+                             VirtualizingPanel.VirtualizationMode="Recycling"
+                             VirtualizingPanel.ScrollUnit="Pixel"
+                             SelectionMode="Single"/>
+                </Grid>
+
                 <Border Grid.Column="1" Background="{DynamicResource Border.Window}"/>
-                <ListBox x:Name="RightList" Grid.Column="2" BorderThickness="0"
-                         Background="{DynamicResource Bg.Input}"
-                         ItemTemplate="{StaticResource RightRowTemplate}"
-                         ItemContainerStyle="{StaticResource DiffItemStyle}"
-                         ScrollViewer.HorizontalScrollBarVisibility="Auto"
-                         ScrollViewer.VerticalScrollBarVisibility="Auto"
-                         VirtualizingPanel.IsVirtualizing="True"
-                         VirtualizingPanel.VirtualizationMode="Recycling"
-                         VirtualizingPanel.ScrollUnit="Pixel"
-                         SelectionMode="Single"/>
+
+                <Grid Grid.Column="2">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="46"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <ListBox x:Name="RightGutterList" Grid.Column="0" BorderThickness="0"
+                             Background="{DynamicResource Bg.Input}"
+                             ItemTemplate="{StaticResource RightGutterTemplate}"
+                             ItemContainerStyle="{StaticResource DiffItemStyle}"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             ScrollViewer.VerticalScrollBarVisibility="Hidden"
+                             VirtualizingPanel.IsVirtualizing="True"
+                             VirtualizingPanel.VirtualizationMode="Recycling"
+                             VirtualizingPanel.ScrollUnit="Pixel"
+                             SelectionMode="Single" Focusable="False"/>
+                    <ListBox x:Name="RightList" Grid.Column="1" BorderThickness="0"
+                             Background="{DynamicResource Bg.Input}"
+                             ItemTemplate="{StaticResource RightRowTemplate}"
+                             ItemContainerStyle="{StaticResource DiffItemStyle}"
+                             ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                             ScrollViewer.VerticalScrollBarVisibility="Auto"
+                             VirtualizingPanel.IsVirtualizing="True"
+                             VirtualizingPanel.VirtualizationMode="Recycling"
+                             VirtualizingPanel.ScrollUnit="Pixel"
+                             SelectionMode="Single"/>
+                </Grid>
+
                 <TextBlock x:Name="EmptyHint" Text="选择左右两个文件开始对比"
                            FontSize="13" HorizontalAlignment="Center" VerticalAlignment="Center"
                            IsHitTestVisible="False"

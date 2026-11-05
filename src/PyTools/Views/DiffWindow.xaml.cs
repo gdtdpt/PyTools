@@ -18,6 +18,8 @@ namespace PyTools.Views
     /// 装载三入口（无按钮）：拖入文件 / 单击文件槽弹选择框 / 鼠标悬停该侧按 Ctrl+V（粘贴跟随悬停侧，
     /// 不抢键盘焦点——点击已被定义为「弹选择框」，两者靠悬停解耦）。
     /// 比较触发：首次双侧就绪自动比较；之后切换文件只清结果并提示手动（Ctrl+Enter → 开始比较）。
+    /// 结果区每侧 = 46px 行号冻结列 + 内容列（2026-11-04 拍板）：横滚只滚内容，行号钉在左缘；
+    /// 垂直滚动四个列表互相同步，水平只在两个内容列之间互写。
     /// </summary>
     public partial class DiffWindow : Window
     {
@@ -35,7 +37,8 @@ namespace PyTools.Views
         private bool _autoComparePending = true;   // 首次双侧就绪自动比较；比较过一次后改手动
         private bool _scrollToFirstDiffOnCompare;  // 调试预载时滚动到首个差异行（截图自验）
         private int _taskSeq;                      // 过期结果丢弃（换文件时旧任务可能后返回）
-        private ScrollViewer _leftScroll, _rightScroll;
+        private ScrollViewer _leftGutterScroll, _leftScroll;    // 左侧：行号冻结列 + 内容列
+        private ScrollViewer _rightScroll, _rightGutterScroll;  // 右侧：内容列 + 行号冻结列
         private bool _syncingScroll;
 
         // ---- 差异跳转（F3/Shift+F3）----
@@ -75,11 +78,14 @@ namespace PyTools.Views
 
         private void OnWindowLoaded(object sender, RoutedEventArgs e)
         {
-            // ListBox 模板展开后才能取到内部 ScrollViewer（滚动同步的挂点）
+            // ListBox 模板展开后才能取到内部 ScrollViewer（滚动同步的挂点）；
+            // 每侧两个（行号冻结列 + 内容列），共四个
+            _leftGutterScroll = FindScrollViewer(LeftGutterList);
             _leftScroll = FindScrollViewer(LeftList);
             _rightScroll = FindScrollViewer(RightList);
-            if (_leftScroll != null) _leftScroll.ScrollChanged += OnLeftScrollChanged;
-            if (_rightScroll != null) _rightScroll.ScrollChanged += OnRightScrollChanged;
+            _rightGutterScroll = FindScrollViewer(RightGutterList);
+            foreach (var viewer in AllScrolls())
+                if (viewer != null) viewer.ScrollChanged += OnAnyScrollChanged;
         }
 
         // ---- 文件装载（三入口共用链路）----
@@ -156,6 +162,8 @@ namespace PyTools.Views
             _taskSeq++; // 作废进行中的比较
             LeftList.ItemsSource = null;
             RightList.ItemsSource = null;
+            LeftGutterList.ItemsSource = null;
+            RightGutterList.ItemsSource = null;
             EmptyHint.Visibility = Visibility.Visible;
             _result = null;
             _diffIndexes = null;
@@ -318,9 +326,10 @@ namespace PyTools.Views
             _focusedSeq = -1;
             LeftList.ItemsSource = result.Rows;
             RightList.ItemsSource = result.Rows;
+            LeftGutterList.ItemsSource = result.Rows;
+            RightGutterList.ItemsSource = result.Rows;
             EmptyHint.Visibility = result.Rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-            if (_leftScroll != null) _leftScroll.ScrollToVerticalOffset(0);
-            if (_rightScroll != null) _rightScroll.ScrollToVerticalOffset(0);
+            SetVerticalAll(0);
 
             SetStatus(result.DifferenceCount == 0
                 ? "两个文件内容相同"
@@ -331,35 +340,56 @@ namespace PyTools.Views
                 // 直接按行高算像素偏移：虚拟化下 ScrollIntoView 在布局完成前调用不可靠（实测滚不动），
                 // 像素滚动只依赖固定行高，确定性生效
                 var rowIndex = result.Rows.FindIndex(delegate(DiffRow row) { return row.Kind != DiffKind.Equal; });
-                if (rowIndex > 0)
-                {
-                    var offset = rowIndex * RowHeight;
-                    if (_leftScroll != null) _leftScroll.ScrollToVerticalOffset(offset);
-                    if (_rightScroll != null) _rightScroll.ScrollToVerticalOffset(offset);
-                }
+                if (rowIndex > 0) SetVerticalAll(rowIndex * RowHeight);
             }
         }
 
-        // ---- 滚动同步（垂直 + 水平，防回环）----
+        // ---- 滚动同步（垂直四个列表全同步；水平只在两个内容列之间互写，防回环）----
+        // 行号冻结列 Horizontal=Disabled 永不横滚，水平同步不经过它。
 
-        private void OnLeftScrollChanged(object sender, ScrollChangedEventArgs e)
+        private ScrollViewer[] AllScrolls()
         {
-            SyncScroll(_leftScroll, _rightScroll, e);
+            return new[] { _leftGutterScroll, _leftScroll, _rightScroll, _rightGutterScroll };
         }
 
-        private void OnRightScrollChanged(object sender, ScrollChangedEventArgs e)
+        private void OnAnyScrollChanged(object sender, ScrollChangedEventArgs e)
         {
-            SyncScroll(_rightScroll, _leftScroll, e);
-        }
-
-        private void SyncScroll(ScrollViewer source, ScrollViewer target, ScrollChangedEventArgs e)
-        {
-            if (_syncingScroll || source == null || target == null) return;
+            if (_syncingScroll) return;
+            var source = sender as ScrollViewer;
+            if (source == null) return;
             _syncingScroll = true;
             try
             {
-                if (e.VerticalChange != 0) target.ScrollToVerticalOffset(source.VerticalOffset);
-                if (e.HorizontalChange != 0) target.ScrollToHorizontalOffset(source.HorizontalOffset);
+                if (e.VerticalChange != 0)
+                {
+                    foreach (var viewer in AllScrolls())
+                        if (viewer != null && !ReferenceEquals(viewer, source))
+                            viewer.ScrollToVerticalOffset(source.VerticalOffset);
+                }
+                if (e.HorizontalChange != 0)
+                {
+                    if (ReferenceEquals(source, _leftScroll) && _rightScroll != null)
+                        _rightScroll.ScrollToHorizontalOffset(source.HorizontalOffset);
+                    else if (ReferenceEquals(source, _rightScroll) && _leftScroll != null)
+                        _leftScroll.ScrollToHorizontalOffset(source.HorizontalOffset);
+                }
+            }
+            finally
+            {
+                _syncingScroll = false;
+            }
+        }
+
+        /// <summary>四个列表统一写垂直 offset（各自按自身 ScrollableHeight 钳制；行号列因无横滚条
+        /// 视口略高、可滚范围略大，写同一值即可，多出的部分被钳制掉，不会漂）。</summary>
+        private void SetVerticalAll(double offset)
+        {
+            _syncingScroll = true;
+            try
+            {
+                foreach (var viewer in AllScrolls())
+                    if (viewer != null)
+                        viewer.ScrollToVerticalOffset(Math.Max(0, Math.Min(offset, Math.Max(0, viewer.ScrollableHeight))));
             }
             finally
             {
@@ -434,22 +464,14 @@ namespace PyTools.Views
         }
 
         /// <summary>把命中行滚到视口垂直居中。行已在视口内时 ScrollIntoView 几乎不动，用户会以为没跳；
-        /// 居中让每次跳转都有明确的画面位移。两栏同步写同一像素值（行高恒定，不会漂）。</summary>
+        /// 居中让每次跳转都有明确的画面位移。四个列表直接写同一像素值（行高恒定，不会漂；
+        /// 行号列若只靠 ScrollIntoView 的同步跟随，会在 ScrollIntoView 与 CenterRow 之间闪一下旧位置）。</summary>
         private void CenterRow(int rowIndex)
         {
             if (_leftScroll == null) return;
             var target = rowIndex * RowHeight - (_leftScroll.ViewportHeight - RowHeight) / 2;
             target = Math.Max(0, Math.Min(target, Math.Max(0, _leftScroll.ScrollableHeight)));
-            _syncingScroll = true;
-            try
-            {
-                _leftScroll.ScrollToVerticalOffset(target);
-                if (_rightScroll != null) _rightScroll.ScrollToVerticalOffset(target);
-            }
-            finally
-            {
-                _syncingScroll = false;
-            }
+            SetVerticalAll(target);
         }
 
         /// <summary>跳转后水平定位：change 行把第一个行内差异片段滚到视口 40% 处（等宽字体按字符偏移估算 x）；
