@@ -37,6 +37,7 @@ namespace PyTools
         private CronView _cronView;
         private RegexView _regexView;
         private TranslateView _translateView;
+        private NamingView _namingView;
         private DiffWindow _diffWindow; // 独立常驻窗口（M4 diff）：不寄居呼出壳，关闭即销毁
         private OcrWindow _ocrWindow;   // 独立常驻窗口（M4 ai-ocr）：与 diff 同族，多窗并存互不干扰
         private ClipboardHistory _clipHistory;
@@ -101,6 +102,10 @@ namespace PyTools
                 else if (arg.StartsWith("--ocr-clip-dump=", StringComparison.Ordinal))
                 {
                     _debugClipDump = arg.Substring("--ocr-clip-dump=".Length);
+                }
+                else if (arg.StartsWith("--naming-text=", StringComparison.Ordinal))
+                {
+                    _debugQuery = arg.Substring("--naming-text=".Length); // 与 --query= 等价，命名视图专用写法
                 }
             }
             _bootAddApp = ExtractAddAppArg(args); // 空串 = 带参数但值无效；null = 未带参数
@@ -194,6 +199,10 @@ namespace PyTools
                 _translateView = new TranslateView();
                 if (_view != null) _translateView.Margin = _view.Margin;
 
+                // 代码命名视图（M4 AI 批）：工具固定尺寸模式（780×560，单列列表）
+                _namingView = new NamingView { PageStep = _config.PageStep };
+                if (_view != null) _namingView.Margin = _view.Margin;
+
                 _clipWatcher = new ClipboardWatcher(OnClipboardUpdate);
                 if (!_clipWatcher.Start()) Logger.Error("clipboard watcher failed to start");
 
@@ -249,6 +258,12 @@ namespace PyTools
                         ShowSummon();
                         return;
                     }
+                    if (ReferenceEquals(content, _namingView))
+                    {
+                        if (_namingView.TryExitActionMode()) return;
+                        ShowSummon();
+                        return;
+                    }
                     if (ReferenceEquals(content, _clipView) && _clipFromLauncher)
                     {
                         ShowSummon(); // 启动器进入的剪贴板：Esc 回启动器空态（M3 定案）
@@ -301,6 +316,14 @@ namespace PyTools
                     else if (args.Contains("--cron")) ShowCron();
                     else if (args.Contains("--regex")) ShowRegex();
                     else if (args.Contains("--translate")) ShowTranslate();
+                    else if (args.Contains("--naming"))
+                    {
+                        // --naming-text=<描述> 预填；--naming-demo 直接铺两批示例结果（截图自验，不请求 AI）
+                        ShowNaming(delegate
+                        {
+                            if (_namingView != null) _namingView.DebugPreload(_debugQuery, args.Contains("--naming-demo"));
+                        });
+                    }
                     else if (args.Contains("--diff"))
                     {
                         // 预载必须挂到开窗回调里：窗口要到壳隐藏后才创建
@@ -329,6 +352,7 @@ namespace PyTools
                     else if (args.Contains("--cron")) _cronView.ExprBox.Text = _debugQuery;
                     else if (args.Contains("--regex")) { _regexView.ExprBox.Text = _debugQuery; }
                     else if (args.Contains("--translate")) { _translateView.SourceBox.Text = _debugQuery; }
+                    else if (args.Contains("--naming")) { _namingView.InputBox.Text = _debugQuery; }
                     else _view.SearchBox.Text = _debugQuery;
                     }
                 }
@@ -489,6 +513,13 @@ namespace PyTools
         private void ShowTranslate()
         {
             ShowShell(_translateView, _translateView.ResetForTranslate, "translate", new Size(900, 620));
+        }
+
+        /// <summary>代码命名视图（M4 AI 批）：由启动器内置命令条目进入；固定尺寸模式（780×560，单列列表）。</summary>
+        private void ShowNaming(Action afterOpen = null)
+        {
+            ShowShell(_namingView, _namingView.ResetForNaming, "naming", new Size(780, 560));
+            if (afterOpen != null) afterOpen();
         }
 
         /// <summary>
@@ -1093,6 +1124,7 @@ namespace PyTools
                 else if (string.Equals(entry.CommandId, "cron", StringComparison.OrdinalIgnoreCase)) ShowCron();
                 else if (string.Equals(entry.CommandId, "regex", StringComparison.OrdinalIgnoreCase)) ShowRegex();
                 else if (string.Equals(entry.CommandId, "translate", StringComparison.OrdinalIgnoreCase)) ShowTranslate();
+                else if (string.Equals(entry.CommandId, "naming", StringComparison.OrdinalIgnoreCase)) ShowNaming();
                 else if (string.Equals(entry.CommandId, "diff", StringComparison.OrdinalIgnoreCase)) ShowDiff();
                 else if (string.Equals(entry.CommandId, "ocr", StringComparison.OrdinalIgnoreCase)) ShowOcr();
                 else if (string.Equals(entry.CommandId, "format-clipboard", StringComparison.OrdinalIgnoreCase)) RunFormatClipboardAction();

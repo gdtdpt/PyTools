@@ -99,6 +99,14 @@ namespace PyTools.Core
             },
             new BuiltinCommand
             {
+                Id = "naming",
+                Kind = "view",
+                Title = "代码命名",
+                Subtitle = "由名词或业务描述生成变量/类/表名等命名",
+                Aliases = new[] { "naming", "var", "命名" } // var = v1 最高频呼出词（keywords 首位）
+            },
+            new BuiltinCommand
+            {
                 Id = "format-clipboard",
                 Kind = "action",
                 Title = "格式化剪贴板",

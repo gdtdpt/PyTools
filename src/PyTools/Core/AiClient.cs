@@ -596,6 +596,240 @@ namespace PyTools.Core
                 : new AiTranslateResult { Error = "AI 未返回译文" };
         }
 
+        // ---- 代码命名（v1 tools/code-naming 语义，M4 AI 批第四个消费者）----
+
+        private const int NamingTimeoutMs = 60000; // 与 OCR / 翻译同口径
+        /// <summary>输入描述上限（v1 MAX_NAMING_TEXT 口径）。</summary>
+        public const int NamingMaxInput = 200;
+        /// <summary>exclude 上限（v1 口径：最多带 40 条已出现候选）。</summary>
+        public const int NamingMaxExclude = 40;
+
+        /// <summary>
+        /// 命名提示词：v1 原文照搬（八组、五风格、必给四组、每组 1 条、只输出 JSON）。
+        /// 分组顺序在解析后按 NamingGroupOrder 重排，不依赖模型输出顺序。
+        /// </summary>
+        private const string NamingPrompt =
+            "你是内网里的代码命名助手。用户给出的 input 可能是一个名词，也可能是一段业务描述；" +
+            "请先提炼出可直接命名的核心概念，再给出各语言通用的命名。\n" +
+            "exclude 是用户已经看过的候选，本次必须全部避开。\n" +
+            "只输出一个 JSON 对象，不要输出 Markdown、代码块或解释性文字。\n" +
+            "JSON 字段:\n" +
+            "- core: 提炼出的核心概念，简短\n" +
+            "- note: 一句话说明取词依据或命名约定（例如表名为何用复数）\n" +
+            "- items: 数组，每项包含 group、style、value，可选 note\n" +
+            "group 只能取：变量、布尔变量、类、方法、常量、表名、字段、文件名\n" +
+            "style 只能取：camelCase、PascalCase、snake_case、UPPER_SNAKE_CASE、kebab-case\n" +
+            "必给四组：变量（camelCase）、类（PascalCase）、表名（snake_case）、字段（snake_case）；" +
+            "布尔变量、方法、常量、文件名只在输入适用时给出。\n" +
+            "每组只给 1 条最常用的候选。value 只能由 ASCII 字母、数字、下划线和连字符组成，" +
+            "不加引号、不加说明文字。";
+
+        /// <summary>分组展示顺序（固定，避免同一输入每次排序不同；同时是白名单）。</summary>
+        public static readonly string[] NamingGroupOrder =
+            { "变量", "布尔变量", "类", "方法", "常量", "表名", "字段", "文件名" };
+
+        private static readonly string[] NamingStyleNames =
+            { "camelCase", "PascalCase", "snake_case", "UPPER_SNAKE_CASE", "kebab-case" };
+
+        private static readonly Regex NamingValuePattern = new Regex("^[A-Za-z_][A-Za-z0-9_-]*$", RegexOptions.Compiled);
+
+        public sealed class AiNamingItem
+        {
+            public string Group = "";
+            public string Style = "";
+            public string Value = "";
+            public string Note = "";
+        }
+
+        public sealed class AiNamingResult
+        {
+            public bool Ok;
+            public string Core = "";                                    // 提炼出的核心概念
+            public string Note = "";                                    // 取词依据（一句话）
+            public List<AiNamingItem> Items = new List<AiNamingItem>();  // 已按 NamingGroupOrder 排序
+            public string Model = "";
+            public string Error = "";
+            public bool RequestFailed;                                  // 请求类失败 → UI 提示可在设置中更换模型
+        }
+
+        public static Task<AiNamingResult> NamingAsync(string text, IList<string> exclude)
+        {
+            return Task.Run(delegate { return Naming(text, exclude); });
+        }
+
+        public static AiNamingResult Naming(string text, IList<string> exclude, string dir = null)
+        {
+            var d = Dir(dir);
+            var status = Status(d);
+            if (!status.Available) return new AiNamingResult { Error = status.Reason };
+
+            var input = (text ?? "").Trim();
+            var invalid = ValidateNamingInput(input);
+            if (invalid.Length > 0) return new AiNamingResult { Error = invalid };
+
+            var seen = NormalizeNamingExclude(exclude);
+            var cfg = LoadConfig(d);
+            AiNamingResult parsed;
+            try
+            {
+                var raw = Request(cfg, cfg.BaseUrl, "POST",
+                    Serialize(BuildNamingPayload(cfg, input, seen)), NamingTimeoutMs);
+                parsed = ParseNamingResponse(raw);
+            }
+            catch (WebException wex)
+            {
+                return new AiNamingResult { Error = RequestErrorText(wex, NamingTimeoutMs), RequestFailed = true };
+            }
+            catch (Exception ex)
+            {
+                return new AiNamingResult { Error = ex.Message, RequestFailed = true };
+            }
+
+            if (parsed.Error.Length > 0) return parsed;
+            parsed.Ok = true;
+            parsed.Model = cfg.Model;
+            return parsed;
+        }
+
+        /// <summary>请求体：{input, exclude} 作为 user content（纯文本 JSON，不含 tools；temperature 0）。</summary>
+        internal static Dictionary<string, object> BuildNamingPayload(AiLocalConfig cfg, string text, IList<string> exclude)
+        {
+            var user = new Dictionary<string, object>
+            {
+                { "input", text ?? "" },
+                { "exclude", exclude == null ? new string[0] : exclude.ToArray() },
+            };
+            var payload = new Dictionary<string, object>
+            {
+                {
+                    "messages", new object[]
+                    {
+                        new Dictionary<string, object> { { "role", "system" }, { "content", NamingPrompt } },
+                        new Dictionary<string, object> { { "role", "user" }, { "content", Serialize(user) } },
+                    }
+                },
+                { "temperature", 0 }, // 命名要稳定，同一描述不应每次风格漂移
+            };
+            if (cfg.Model.Length > 0) payload["model"] = cfg.Model;
+            if (cfg.MaxTokens.HasValue) payload["max_tokens"] = cfg.MaxTokens.Value;
+            return payload;
+        }
+
+        /// <summary>
+        /// 命名响应解析（离线可测）：直返 items → 服务端 error → content JSON → 围栏 → 纯文本兜底（无 items 时判错）。
+        /// 白名单/取值正则/批内去重全部在此收口；existing 用于跨批次去重（换一批时不重复已出现的 value）。
+        /// </summary>
+        public static AiNamingResult ParseNamingResponse(string raw, IList<string> existing = null)
+        {
+            var body = ParseJsonDict(raw);
+            if (body == null)
+                return new AiNamingResult { Error = "AI 返回不是 JSON" };
+
+            var directItems = AsArray(Get(body, "items"));
+            if (directItems != null)
+                return FromNamingObject(body, existing);
+
+            var detail = ErrorText(body);
+            if (detail.Length > 0) return new AiNamingResult { Error = detail };
+
+            var choices = AsArray(Get(body, "choices"));
+            var choice = choices != null && choices.Length > 0 ? AsDict(choices[0]) : null;
+            var message = choice != null ? AsDict(Get(choice, "message")) : null;
+            var content = message != null ? Str(Get(message, "content")) : "";
+            if (content.Trim().Length == 0) return new AiNamingResult { Error = "AI 返回内容为空" };
+
+            var parsed = ParseJsonDict(StripCodeFence(content, JsonFencePattern)) ?? ParseJsonDict(ExtractJsonObject(content));
+            if (parsed != null) return FromNamingObject(parsed, existing);
+
+            // 纯文本兜底：模型没按 JSON 输出，但正文里可能只有一条命名（取首行作为变量名级候选）
+            var plain = StripCodeFence(content, AnyFencePattern).Trim();
+            if (plain.Length > 0)
+            {
+                var first = plain.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
+                var value = first.Length > 0 ? first[0].Trim() : "";
+                if (NamingValuePattern.IsMatch(value))
+                {
+                    return new AiNamingResult
+                    {
+                        Items = new List<AiNamingItem>
+                        {
+                            new AiNamingItem { Group = "变量", Style = "camelCase", Value = value, Note = "模型未按 JSON 输出，取首行" },
+                        },
+                    };
+                }
+            }
+            return new AiNamingResult { Error = "AI 未返回可用命名" };
+        }
+
+        private static AiNamingResult FromNamingObject(Dictionary<string, object> parsed, IList<string> existing)
+        {
+            var result = new AiNamingResult
+            {
+                Core = Str(Get(parsed, "core")).Trim(),
+                Note = Str(Get(parsed, "note")).Trim(),
+            };
+
+            var seen = NormalizeNamingExclude(existing);
+            var rawItems = AsArray(Get(parsed, "items"));
+            if (rawItems != null)
+            {
+                foreach (var entry in rawItems)
+                {
+                    var item = AsDict(entry);
+                    if (item == null) continue;
+                    var group = Str(Get(item, "group")).Trim();
+                    var style = Str(Get(item, "style")).Trim();
+                    var value = Str(Get(item, "value")).Trim();
+                    if (Array.IndexOf(NamingGroupOrder, group) < 0) continue;      // 组白名单
+                    if (Array.IndexOf(NamingStyleNames, style) < 0) continue;      // 风格白名单
+                    if (!NamingValuePattern.IsMatch(value)) continue;              // 取值白名单
+                    if (seen.Contains(value)) continue;                            // 批内 + 跨批去重
+                    seen.Add(value);
+                    result.Items.Add(new AiNamingItem
+                    {
+                        Group = group,
+                        Style = style,
+                        Value = value,
+                        Note = Str(Get(item, "note")).Trim(),
+                    });
+                }
+            }
+
+            if (result.Items.Count == 0)
+                return new AiNamingResult { Error = "AI 返回内容缺少可用命名", Core = result.Core, Note = result.Note };
+
+            // 按固定组序重排（模型输出顺序不可信；同组内保持模型给的顺序）
+            result.Items = result.Items
+                .OrderBy(i => Array.IndexOf(NamingGroupOrder, i.Group))
+                .ToList();
+            return result;
+        }
+
+        /// <summary>输入校验（离线可测）：空 → 提示语；超长 → 上限提示。返回空串表示通过。</summary>
+        internal static string ValidateNamingInput(string text)
+        {
+            var value = (text ?? "").Trim();
+            if (value.Length == 0) return "请输入名词或业务描述";
+            if (value.Length > NamingMaxInput) return "输入过长，请控制在 " + NamingMaxInput + " 字以内";
+            return "";
+        }
+
+        /// <summary>exclude 规范化：trim、丢弃空串、保持顺序去重、截到上限（跨批次累积后可能超过 40）。</summary>
+        internal static List<string> NormalizeNamingExclude(IList<string> exclude)
+        {
+            var seen = new List<string>();
+            if (exclude == null) return seen;
+            foreach (var entry in exclude)
+            {
+                var value = (entry ?? "").Trim();
+                if (value.Length == 0) continue;
+                if (seen.Contains(value)) continue;
+                seen.Add(value);
+                if (seen.Count >= NamingMaxExclude) break;
+            }
+            return seen;
+        }
+
         // ---- 响应解析（v1 parseResponseBody 语义，全部离线）----
 
         /// <summary>解析 chat/completions 原始返回。失败时 Error 非空、Pattern 空。</summary>

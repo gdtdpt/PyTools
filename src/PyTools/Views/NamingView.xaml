@@ -1,0 +1,224 @@
+<UserControl x:Class="PyTools.Views.NamingView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:views="clr-namespace:PyTools.Views">
+    <!-- 代码命名视图（M4 AI 批第四消费者）：描述输入 → 八组命名候选 → 点击/回车复制。
+         壳内固定尺寸模式（780×560，App 层通用机制）。换一批 = 追加新批次（最多 3 批，批内组序固定，
+         批次小标题不可选中）；打开不读剪贴板（用户拍板：描述得自己想）。
+         键位照全局约定：↓/↑ 一条、Ctrl+J/K 加速、Ctrl+N/P 翻页、Enter 复制选中行、Ctrl+Enter 动作面板。 -->
+    <Border x:Name="RootBorder"
+            Background="{DynamicResource Bg.Window}"
+            BorderBrush="{DynamicResource Border.Window}"
+            BorderThickness="1"
+            CornerRadius="{DynamicResource Radius.Window}"
+            Effect="{DynamicResource Fx.WindowShadow}">
+        <Grid x:Name="ContentGrid">
+            <Grid Margin="12,14,12,12">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <!-- 输入栏：描述 → 生成 / 换一批 -->
+                <Grid Grid.Row="0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Column="0" Text="描述" VerticalAlignment="Center" Margin="0,0,6,0"
+                               FontSize="{DynamicResource Font.Secondary}"
+                               Foreground="{DynamicResource Text.Secondary}"/>
+
+                    <Grid Grid.Column="1">
+                        <TextBox x:Name="InputBox"
+                                 Height="30"
+                                 FontSize="{DynamicResource Font.Base}"
+                                 BorderThickness="1"
+                                 Padding="6,0,6,0"
+                                 VerticalContentAlignment="Center"
+                                 SpellCheck.IsEnabled="False"
+                                 TextChanged="OnInputChanged"
+                                 GotKeyboardFocus="OnInputFocusChanged"
+                                 LostKeyboardFocus="OnInputFocusChanged"/>
+                        <TextBlock x:Name="InputPlaceholder"
+                                   Text="名词或业务描述，如：下单时间"
+                                   Margin="9,0,6,0"
+                                   VerticalAlignment="Center"
+                                   FontSize="{DynamicResource Font.Base}"
+                                   Foreground="{DynamicResource Text.Placeholder}"
+                                   IsHitTestVisible="False"/>
+                    </Grid>
+
+                    <Button x:Name="GenerateButton" Grid.Column="2" Content="生成"
+                            Style="{StaticResource AccentButton}"
+                            MinWidth="72" Height="28" Margin="8,0,0,0"
+                            Click="OnGenerateClick"/>
+                    <Button x:Name="RerollButton" Grid.Column="3" Content="换一批"
+                            MinWidth="76" Height="28" Margin="8,0,0,0"
+                            ToolTip="同一描述再抽一组候选，自动避开已出现的命名"
+                            Click="OnRerollClick"/>
+                </Grid>
+
+                <!-- 摘要行：核心概念 + 取词依据（无内容时整行隐藏） -->
+                <Grid x:Name="SummaryRow" Grid.Row="1" Margin="0,10,0,0" Visibility="Collapsed">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="CoreText" Grid.Column="0"
+                               FontSize="{DynamicResource Font.Secondary}"
+                               Foreground="{DynamicResource Accent}"/>
+                    <TextBlock x:Name="NoteText" Grid.Column="1" Margin="10,0,0,0"
+                               FontSize="{DynamicResource Font.Secondary}"
+                               Foreground="{DynamicResource Text.Secondary}"
+                               TextTrimming="CharacterEllipsis"/>
+                </Grid>
+
+                <!-- 结果列表：批次小标题 + 命名行（行点击即复制） -->
+                <Border Grid.Row="2" Margin="0,8,0,0"
+                        Background="{DynamicResource Bg.Input}"
+                        BorderBrush="{DynamicResource Border.Input}"
+                        BorderThickness="1"
+                        CornerRadius="{DynamicResource Radius.Control}">
+                    <Grid>
+                        <ListBox x:Name="PART_List"
+                                 Background="Transparent"
+                                 BorderThickness="0"
+                                 Padding="4,4,4,6"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                 VirtualizingPanel.IsVirtualizing="True"
+                                 VirtualizingPanel.VirtualizationMode="Recycling"
+                                 SelectionMode="Single">
+                            <ListBox.ItemContainerStyle>
+                                <Style TargetType="ListBoxItem">
+                                    <Setter Property="Padding" Value="0"/>
+                                    <Setter Property="Template">
+                                        <Setter.Value>
+                                            <ControlTemplate TargetType="ListBoxItem">
+                                                <Border x:Name="Bd"
+                                                        Background="Transparent"
+                                                        CornerRadius="{DynamicResource Radius.Control}"
+                                                        Margin="0,1,0,1"
+                                                        Padding="0">
+                                                    <ContentPresenter/>
+                                                </Border>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Bg.ItemHover}"/>
+                                                    </Trigger>
+                                                    <Trigger Property="IsSelected" Value="True">
+                                                        <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Bg.ItemSelected}"/>
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                    <Style.Triggers>
+                                        <!-- 批次小标题：不可选中、不响应鼠标（键盘步进在视图层跳过） -->
+                                        <DataTrigger Binding="{Binding IsHeader}" Value="True">
+                                            <Setter Property="Focusable" Value="False"/>
+                                            <Setter Property="IsHitTestVisible" Value="False"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </ListBox.ItemContainerStyle>
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid>
+                                        <Grid x:Name="HeaderRow" Height="28">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="{Binding HeaderText}"
+                                                       VerticalAlignment="Center"
+                                                       Margin="6,0,0,0"
+                                                       FontSize="{DynamicResource Font.Secondary}"
+                                                       Foreground="{DynamicResource Text.Secondary}"/>
+                                            <Border Grid.Column="1" Height="1" Margin="8,0,6,0"
+                                                    VerticalAlignment="Center"
+                                                    Background="{DynamicResource Border.Input}"/>
+                                        </Grid>
+                                        <Grid x:Name="ItemRow" Height="28">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="56"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="{Binding Group}"
+                                                       VerticalAlignment="Center" Margin="6,0,0,0"
+                                                       FontSize="{DynamicResource Font.Secondary}"
+                                                       Foreground="{DynamicResource Text.Secondary}"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding Value}"
+                                                       VerticalAlignment="Center"
+                                                       FontFamily="Consolas"
+                                                       FontSize="13"
+                                                       Foreground="{DynamicResource Text.Primary}"/>
+                                            <TextBlock Grid.Column="2" Text="{Binding Style}"
+                                                       VerticalAlignment="Center" Margin="10,0,0,0"
+                                                       FontSize="{DynamicResource Font.Secondary}"
+                                                       Foreground="{DynamicResource Text.Placeholder}"/>
+                                            <TextBlock Grid.Column="3" Text="{Binding Note}"
+                                                       VerticalAlignment="Center" Margin="12,0,6,0"
+                                                       FontSize="{DynamicResource Font.Secondary}"
+                                                       Foreground="{DynamicResource Text.Placeholder}"
+                                                       TextTrimming="CharacterEllipsis"/>
+                                        </Grid>
+                                    </Grid>
+                                    <DataTemplate.Triggers>
+                                        <DataTrigger Binding="{Binding IsHeader}" Value="True">
+                                            <Setter TargetName="HeaderRow" Property="Visibility" Value="Visible"/>
+                                            <Setter TargetName="ItemRow" Property="Visibility" Value="Collapsed"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding IsHeader}" Value="False">
+                                            <Setter TargetName="HeaderRow" Property="Visibility" Value="Collapsed"/>
+                                            <Setter TargetName="ItemRow" Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                    </DataTemplate.Triggers>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                        <TextBlock x:Name="EmptyHint"
+                                   Text="输入名词或业务描述，回车生成命名"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   FontSize="{DynamicResource Font.Base}"
+                                   Foreground="{DynamicResource Text.Placeholder}"
+                                   IsHitTestVisible="False"/>
+                    </Grid>
+                </Border>
+
+                <!-- 状态栏：左 = 生命周期文案；右 = 操作键帽 -->
+                <Grid Grid.Row="3" Margin="0,8,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="StatusText" Grid.Column="0"
+                               Text="等待输入描述"
+                               VerticalAlignment="Center"
+                               FontSize="{DynamicResource Font.Secondary}"
+                               Foreground="{DynamicResource Text.Placeholder}"
+                               TextTrimming="CharacterEllipsis"/>
+                    <Border x:Name="ActionsHint" Grid.Column="1"
+                            Background="{DynamicResource Bg.ItemHover}"
+                            CornerRadius="{DynamicResource Radius.Control}"
+                            Padding="8,3" Margin="8,0,0,0" Cursor="Hand">
+                        <TextBlock Text="操作 Ctrl+Enter"
+                                   FontSize="{DynamicResource Font.Secondary}"
+                                   Foreground="{DynamicResource Text.Secondary}"/>
+                    </Border>
+                </Grid>
+
+                <!-- 动作面板（独立浮层组件） -->
+                <views:ActionPanel x:Name="Actions"/>
+            </Grid>
+        </Grid>
+    </Border>
+</UserControl>

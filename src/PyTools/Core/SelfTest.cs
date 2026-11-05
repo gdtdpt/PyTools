@@ -1302,6 +1302,68 @@ namespace PyTools.Core
                 return null;
             }));
 
+            // ---- AI 代码命名（code-naming，M4 AI 批第四消费者；离线部分）----
+
+            results.Add(Test("AiClient：命名请求体（input/exclude 序列化、无 tools、temperature 0）+ 输入校验", () =>
+            {
+                var cfg = new AiClient.AiLocalConfig { Model = "m1", BaseUrl = "http://x", ApiKey = "k" };
+                var serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+                var json = serializer.Serialize(AiClient.BuildNamingPayload(cfg, "order time desc", new[] { "orderTime", "placedAt" }));
+                if (!json.Contains("input\\\":\\\"order time desc")) return "缺 input";
+                if (!json.Contains("orderTime")) return "exclude 未序列化";
+                if (!json.Contains("\"temperature\":0")) return "命名应固定 temperature=0";
+                if (json.Contains("\"tools\"")) return "命名不应带 tools";
+                if (!json.Contains("\"model\":\"m1\"")) return "缺 model";
+
+                if (AiClient.ValidateNamingInput("   ") != "请输入名词或业务描述") return "空白输入应拒绝";
+                var tooLong = new string('x', AiClient.NamingMaxInput + 1);
+                if (AiClient.ValidateNamingInput(tooLong).Length == 0) return "超长输入应拒绝";
+                if (AiClient.ValidateNamingInput(new string('x', AiClient.NamingMaxInput)).Length != 0) return "上限内输入不应拒绝";
+
+                var normalized = AiClient.NormalizeNamingExclude(new[] { " a ", "", "a", "b" });
+                if (normalized.Count != 2 || normalized[0] != "a" || normalized[1] != "b")
+                    return "exclude 规范化（trim/去空/去重）失效";
+                return null;
+            }));
+
+            results.Add(Test("AiClient：命名响应解析（白名单过滤 / 非法取值 / 批内去重 / 组序重排）", () =>
+            {
+                var raw = "{\"choices\":[{\"message\":{\"content\":\"{\\\"core\\\":\\\"order time\\\",\\\"note\\\":\\\"动词+名词\\\","
+                    + "\\\"items\\\":["
+                    + "{\\\"group\\\":\\\"表名\\\",\\\"style\\\":\\\"snake_case\\\",\\\"value\\\":\\\"order_records\\\"},"
+                    + "{\\\"group\\\":\\\"变量\\\",\\\"style\\\":\\\"camelCase\\\",\\\"value\\\":\\\"orderTime\\\"},"
+                    + "{\\\"group\\\":\\\"颜色\\\",\\\"style\\\":\\\"camelCase\\\",\\\"value\\\":\\\"colorName\\\"},"
+                    + "{\\\"group\\\":\\\"类\\\",\\\"style\\\":\\\"PascalCase\\\",\\\"value\\\":\\\"OrderRecord\\\"},"
+                    + "{\\\"group\\\":\\\"字段\\\",\\\"style\\\":\\\"snake_case\\\",\\\"value\\\":\\\"order time\\\"},"
+                    + "{\\\"group\\\":\\\"方法\\\",\\\"style\\\":\\\"camelCase\\\",\\\"value\\\":\\\"orderTime\\\"}]}\"}}]}";
+                var parsed = AiClient.ParseNamingResponse(raw);
+                if (parsed.Items.Count != 3) return "应过滤非白名单组/非法取值/重复值，实得 " + parsed.Items.Count + "（" + parsed.Error + "）";
+                if (parsed.Items[0].Group != "变量" || parsed.Items[0].Value != "orderTime") return "组序重排失效（变量应在前）";
+                if (parsed.Items[1].Group != "类") return "组序重排失效（类应在第二）";
+                if (parsed.Items[2].Group != "表名") return "组序重排失效（表名应在第三）";
+                if (parsed.Core != "order time" || parsed.Note.Length == 0) return "core/note 未透出";
+                return null;
+            }));
+
+            results.Add(Test("AiClient：命名响应解析（围栏 / 服务端 error / 跨批去重 / 空候选报错）", () =>
+            {
+                var fenced = AiClient.ParseNamingResponse("{\"choices\":[{\"message\":{\"content\":\"```json\\n{\\\"items\\\":[{\\\"group\\\":\\\"常量\\\",\\\"style\\\":\\\"UPPER_SNAKE_CASE\\\",\\\"value\\\":\\\"MAX_RETRY\\\"}]}\\n```\"}}]}");
+                if (fenced.Items.Count != 1 || fenced.Items[0].Value != "MAX_RETRY") return "围栏 items 未解析: " + fenced.Error;
+
+                var dedup = AiClient.ParseNamingResponse("{\"choices\":[{\"message\":{\"content\":\"{\\\"items\\\":[{\\\"group\\\":\\\"变量\\\",\\\"style\\\":\\\"camelCase\\\",\\\"value\\\":\\\"orderTime\\\"},{\\\"group\\\":\\\"类\\\",\\\"style\\\":\\\"PascalCase\\\",\\\"value\\\":\\\"OrderRecord\\\"}]}\"}}]}", new[] { "orderTime" });
+                if (dedup.Items.Count != 1 || dedup.Items[0].Value != "OrderRecord") return "跨批去重失效";
+
+                var serverError = AiClient.ParseNamingResponse("{\"error\":{\"message\":\"余额不足\"}}");
+                if (serverError.Error != "余额不足") return "服务端 error 未透出";
+
+                var empty = AiClient.ParseNamingResponse("{\"choices\":[{\"message\":{\"content\":\"{\\\"items\\\":[]}\"}}]}");
+                if (empty.Error != "AI 返回内容缺少可用命名") return "空候选应报错: " + empty.Error;
+
+                var notJson = AiClient.ParseNamingResponse("这不是 JSON");
+                if (notJson.Error.Length == 0) return "非 JSON 应报错";
+                return null;
+            }));
+
             results.Add(Test("OcrImage：文件白名单 + 大小上限 + 解码校验", () =>
             {
                 var dir = TempClipDir();
