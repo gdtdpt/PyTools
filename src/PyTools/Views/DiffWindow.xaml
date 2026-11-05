@@ -308,7 +308,7 @@
                        VerticalAlignment="Center"
                        Foreground="{DynamicResource Text.Secondary}"
                        TextTrimming="CharacterEllipsis"/>
-            <TextBlock Grid.Column="1" Text="F3/Shift+F3 跳转差异 · Ctrl+Enter 操作 · Esc 关闭" FontSize="12"
+            <TextBlock Grid.Column="1" Text="F3/N 下一处 · Shift+F3/P 上一处 · Ctrl+Enter 操作 · Esc 关闭" FontSize="12"
                        VerticalAlignment="Center"
                        Foreground="{DynamicResource Text.Placeholder}"/>
         </Grid>

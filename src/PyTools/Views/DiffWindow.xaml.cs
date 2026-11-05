@@ -333,7 +333,7 @@ namespace PyTools.Views
 
             SetStatus(result.DifferenceCount == 0
                 ? "两个文件内容相同"
-                : "比较完成，共 " + _diffIndexes.Count + " 处差异（F3/Shift+F3 跳转）", "success");
+                : "比较完成，共 " + _diffIndexes.Count + " 处差异（F3/Shift+F3 或 N/P 跳转）", "success");
 
             if (_scrollToFirstDiffOnCompare)
             {
@@ -410,7 +410,8 @@ namespace PyTools.Views
             return null;
         }
 
-        // ---- 差异跳转（F3 下一处 / Shift+F3 上一处，2026-11-04 增补拍板）----
+        // ---- 差异跳转（F3 下一处 / Shift+F3 上一处，2026-11-04 增补拍板；
+        //      备用键 N/P——F3 易被第三方全局热键占用，2026-11-05 拍板）----
 
         private void JumpToDiff(bool forward)
         {
@@ -555,6 +556,14 @@ namespace PyTools.Views
                 return;
             }
             if (e.Key == Key.F3) { JumpToDiff((Keyboard.Modifiers & ModifierKeys.Shift) == 0); e.Handled = true; return; }
+            // F3 备用键 N/P（2026-11-05 拍板）：F3 是全局热键重灾区（被第三方 RegisterHotkey
+            // 截走后焦点应用永远收不到），裸字母键几乎不会被全局注册；仅排除 Ctrl/Alt，
+            // Shift 忽略（N/P 方向与大小写无关）
+            if ((Keyboard.Modifiers & (ModifierKeys.Control | ModifierKeys.Alt)) == 0)
+            {
+                if (e.Key == Key.N) { JumpToDiff(true); e.Handled = true; return; }
+                if (e.Key == Key.P) { JumpToDiff(false); e.Handled = true; return; }
+            }
             if (ctrl && e.Key == Key.Enter) { ShowActions(); e.Handled = true; return; }
             if (ctrl && e.Key == Key.V) { PasteToHoverSide(); e.Handled = true; return; }
             if (e.Key == Key.Escape) { Close(); e.Handled = true; }
@@ -570,8 +579,8 @@ namespace PyTools.Views
                 new ActionItem("select-left", "选择左侧文件", "L"),
                 new ActionItem("select-right", "选择右侧文件", "R"),
                 new ActionItem("compare", "开始比较", "C", bothLoaded),
-                new ActionItem("diff-next", "跳到下一个差异", "F3", hasDiffs),
-                new ActionItem("diff-prev", "跳到上一个差异", "Shift+F3", hasDiffs)
+                new ActionItem("diff-next", "跳到下一个差异", "F3/N", hasDiffs),
+                new ActionItem("diff-prev", "跳到上一个差异", "Shift+F3/P", hasDiffs)
             });
         }
 
