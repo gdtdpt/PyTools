@@ -136,7 +136,7 @@ namespace PyTools
             try
             {
                 _config = AppConfig.Load(Path.Combine(AppDirectory, "config.json"));
-                ApplyTheme(_config.LiteMode);
+                ApplyTheme();
                 _uiContext = SynchronizationContext.Current;
 
                 // 启动器索引（M2a）：后台扫描开始，完成后结果上线
@@ -377,23 +377,58 @@ namespace PyTools
         private const string OcrDemoText =
             "月度对账说明\r\n\r\n本月对账工作于 11 月 3 日完成，共核对 128 笔交易，\r\n其中 3 笔存在金额差异，已提交财务复核。\r\n\r\n编号            金额          状态\r\nTXN-20261103    12,480.00     已核对\r\nTXN-20261104     8,300.00     待复核\r\nTXN-20261105     4,150.00     已核对";
 
-        private void ApplyTheme(bool liteMode)
+        /// <summary>
+        /// 重挂主题字典（2026-11-05 明暗主题）。挂载顺序 Theme → Dark → Lite → Controls：
+        /// Dark 与 Lite（简洁模式）正交可叠加；Controls 必须最后挂。
+        /// 设置窗口点击即调用（热切换，DynamicResource 全应用即时刷新）。
+        /// </summary>
+        public void ApplyTheme()
         {
+            bool dark = ResolveDark();
             var baseUri = new Uri("pack://application:,,,/Themes/Theme.xaml");
             Resources.MergedDictionaries.Clear();
             Resources.MergedDictionaries.Add(new ResourceDictionary { Source = baseUri });
-            if (liteMode)
+            if (dark)
+            {
+                Resources.MergedDictionaries.Add(new ResourceDictionary
+                {
+                    Source = new Uri("pack://application:,,,/Themes/Theme.Dark.xaml")
+                });
+            }
+            if (_config.LiteMode)
             {
                 Resources.MergedDictionaries.Add(new ResourceDictionary
                 {
                     Source = new Uri("pack://application:,,,/Themes/Theme.Lite.xaml")
                 });
             }
-            // 控件隐式样式库：必须后挂，且与简洁模式无关（控件圆角两形态一致）
+            // 控件隐式样式库：必须后挂，且与主题形态无关（控件圆角两形态一致）
             Resources.MergedDictionaries.Add(new ResourceDictionary
             {
                 Source = new Uri("pack://application:,,,/Themes/Controls.xaml")
             });
+        }
+
+        /// <summary>
+        /// 是否使用深色：v2.theme = dark，或 system 且系统应用为深色。
+        /// 跟随系统只在启动与设置点击时读一次注册表（不监听实时变化，2026-11-05 拍板）。
+        /// </summary>
+        private bool ResolveDark()
+        {
+            var theme = _config != null ? _config.Theme : "light";
+            if (theme == "dark") return true;
+            if (theme != "system") return false;
+            try
+            {
+                using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
+                    @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"))
+                {
+                    var v = key != null ? key.GetValue("AppsUseLightTheme") : null;
+                    if (v is int) return ((int)v) == 0;
+                }
+            }
+            catch (Exception ex) { Logger.Error("read AppsUseLightTheme failed: " + ex.Message); }
+            return false; // 读不到（异常/键缺失）按浅色
         }
 
         // ---- 热键 ----

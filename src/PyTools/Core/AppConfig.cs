@@ -29,6 +29,7 @@ namespace PyTools.Core
         public bool ClipboardPrivacyFilter = true; // 剪贴板隐私格式过滤（M3）
         public string EncodeFormat = "url";        // 编码转换记住上次格式（M4，2026-11-02 用户拍板）
         public string EncodeDirection = "encode";  // 编码转换记住上次方向（M4）
+        public string Theme = "light";             // 主题：light / dark / system（启动读一次注册表，不实时监听，2026-11-05 拍板）
 
         private readonly string _path;
         private Dictionary<string, object> _raw = new Dictionary<string, object>();
@@ -68,6 +69,8 @@ namespace PyTools.Core
             ClipboardPrivacyFilter = GetBool("v2.clipboardPrivacyFilter", ClipboardPrivacyFilter);
             EncodeFormat = GetString("v2.encodeFormat", EncodeFormat);
             EncodeDirection = GetString("v2.encodeDirection", EncodeDirection);
+            Theme = GetString("v2.theme", Theme);
+            if (Theme != "dark" && Theme != "system") Theme = "light"; // 宽容：未知值回浅色
 
             var bounds = _raw.ContainsKey("windowBounds") ? _raw["windowBounds"] as Dictionary<string, object> : null;
             if (bounds != null)
@@ -109,6 +112,15 @@ namespace PyTools.Core
             catch (Exception ex) { Logger.Error("save liteMode failed: " + ex.Message); }
         }
 
+        /// <summary>主题三态（设置窗口点击即热切换，App.ApplyTheme 负责重挂字典）。</summary>
+        public void SaveTheme(string theme)
+        {
+            if (theme != "dark" && theme != "system") theme = "light";
+            Theme = theme;
+            try { _raw["v2.theme"] = theme; WriteBack(); }
+            catch (Exception ex) { Logger.Error("save theme failed: " + ex.Message); }
+        }
+
         /// <summary>编码转换记住上次格式/方向（EncodeView 选项变更时调用，M4）。</summary>
         public void SaveEncodeChoice(string format, string direction)
         {
@@ -143,6 +155,7 @@ namespace PyTools.Core
             _raw["v2.clipboardPrivacyFilter"] = ClipboardPrivacyFilter;
             _raw["v2.encodeFormat"] = EncodeFormat;
             _raw["v2.encodeDirection"] = EncodeDirection;
+            _raw["v2.theme"] = Theme;
             var dir = Path.GetDirectoryName(_path);
             if (!string.IsNullOrEmpty(dir)) System.IO.Directory.CreateDirectory(dir);
             File.WriteAllText(_path, _serializer.Serialize(_raw));

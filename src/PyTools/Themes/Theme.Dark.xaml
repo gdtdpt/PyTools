@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!--
+      深色主题覆盖层（2026-11-05 明暗主题）：只覆盖颜色键（含阴影），字号/圆角/布局/动效两形态强制同值。
+      挂载顺序 Theme → Dark → Lite → Controls：与简洁模式（Theme.Lite.xaml）正交可叠加。
+      selftest 有「Dark 与 Light 颜色键集合一致」硬校验（Core/SelfTest.cs），改键名必须两边同步。
+    -->
+
+    <!-- 颜色 -->
+    <SolidColorBrush x:Key="Bg.Window" Color="#1C2128"/>
+    <SolidColorBrush x:Key="Bg.Input" Color="#2D333B"/>
+    <SolidColorBrush x:Key="Bg.ItemHover" Color="#37414B"/>
+    <SolidColorBrush x:Key="Bg.ItemSelected" Color="#2E4A78"/>
+    <SolidColorBrush x:Key="Border.Window" Color="#444C56"/>
+    <SolidColorBrush x:Key="Border.Input" Color="#444C56"/>
+    <SolidColorBrush x:Key="Border.Scrollbar" Color="#57606A"/>
+    <SolidColorBrush x:Key="Text.Primary" Color="#E6EDF3"/>
+    <SolidColorBrush x:Key="Text.Secondary" Color="#9198A1"/>
+    <SolidColorBrush x:Key="Text.Placeholder" Color="#6E7681"/>
+    <SolidColorBrush x:Key="Accent" Color="#5B8AF5"/>
+    <SolidColorBrush x:Key="Text.Success" Color="#3FB950"/>
+    <SolidColorBrush x:Key="Text.Error" Color="#F85149"/>
+    <SolidColorBrush x:Key="Bg.Toast" Color="#444C56"/>
+    <SolidColorBrush x:Key="Text.OnToast" Color="#E6EDF3"/>
+
+    <!-- 控件态令牌 -->
+    <SolidColorBrush x:Key="Border.Hover" Color="#57678C"/>    <!-- 输入类 hover 边框（带一点蓝的灰）-->
+    <SolidColorBrush x:Key="Accent.Hover" Color="#7BA3F7"/>    <!-- Accent 按钮悬停（亮一档）-->
+    <SolidColorBrush x:Key="Accent.Pressed" Color="#4A75E0"/>  <!-- Accent 按钮按下 -->
+    <SolidColorBrush x:Key="Accent.Soft" Color="#2E4A78"/>     <!-- Accent 淡底：单选选中 / 主按钮禁用 -->
+    <SolidColorBrush x:Key="Bg.Disabled" Color="#262C34"/>     <!-- 禁用底 -->
+    <SolidColorBrush x:Key="Text.Disabled" Color="#6E7681"/>   <!-- 禁用文字（与 Placeholder 同值，语义分离）-->
+    <SolidColorBrush x:Key="Text.OnAccentDisabled" Color="#8FA9E8"/> <!-- 主按钮禁用时压在淡蓝底上的文字 -->
+
+    <!-- 差异对比配色（text-diff）：低饱和深色系，语义与浅色一一对应 -->
+    <SolidColorBrush x:Key="Diff.Add.Bg" Color="#1C3B24"/>        <!-- 增行（绿底）-->
+    <SolidColorBrush x:Key="Diff.Del.Bg" Color="#44242A"/>        <!-- 删行（红底）-->
+    <SolidColorBrush x:Key="Diff.Gap.Bg" Color="#312026"/>        <!-- 对面空档（淡红）-->
+    <SolidColorBrush x:Key="Diff.Inline.Add" Color="#2E5C3A"/>    <!-- 行内增段 -->
+    <SolidColorBrush x:Key="Diff.Inline.Del" Color="#6B3641"/>    <!-- 行内删段 -->
+    <SolidColorBrush x:Key="Diff.Gutter.Bg" Color="#232932"/>     <!-- 行号列底 -->
+    <SolidColorBrush x:Key="Diff.Gutter.Equal" Color="#3D444D"/>  <!-- 行号列左缘状态条：无差异 -->
+    <SolidColorBrush x:Key="Diff.Marker.Changed" Color="#C9963F"/> <!-- 行号列左缘状态条：修改行 -->
+    <SolidColorBrush x:Key="Diff.Inline.Add.Focus" Color="#2F6B3D"/> <!-- 行内增段聚焦加深（F3 命中行）-->
+    <SolidColorBrush x:Key="Diff.Inline.Del.Focus" Color="#7E404D"/> <!-- 行内删段聚焦加深 -->
+    <SolidColorBrush x:Key="Diff.Invisible" Color="#57606A"/>     <!-- 不可见字符竖条标识 -->
+    <SolidColorBrush x:Key="Diff.Focus.Bg" Color="#4A3F1F"/>      <!-- 跳转命中行整行淡黄底 -->
+
+    <!-- 阴影（深色下加重一档补偿对比） -->
+    <DropShadowEffect x:Key="Fx.WindowShadow" BlurRadius="28" ShadowDepth="6" Direction="315" Opacity="0.55"/>
+</ResourceDictionary>

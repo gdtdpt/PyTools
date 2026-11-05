@@ -1496,6 +1496,26 @@ namespace PyTools.Core
                 finally { TryDeleteDir(dir); }
             }));
 
+            results.Add(Test("Theme：Dark 覆盖层与浅色颜色键集合一致（防漏键白屏）", () =>
+            {
+                var light = new ResourceDictionary { Source = new Uri("pack://application:,,,/Themes/Theme.xaml") };
+                var dark = new ResourceDictionary { Source = new Uri("pack://application:,,,/Themes/Theme.Dark.xaml") };
+                var lightColors = new System.Collections.Generic.SortedSet<string>();
+                var darkColors = new System.Collections.Generic.SortedSet<string>();
+                foreach (var k in light.Keys)
+                    if (light[k] is SolidColorBrush) lightColors.Add(k.ToString());
+                foreach (var k in dark.Keys)
+                {
+                    if (!(dark[k] is SolidColorBrush)) continue; // 阴影等非颜色覆盖不计入
+                    if (!lightColors.Contains(k.ToString())) return "Dark 多出浅色没有的颜色键: " + k;
+                    darkColors.Add(k.ToString());
+                }
+                foreach (var k in lightColors)
+                    if (!darkColors.Contains(k)) return "Dark 缺少颜色键: " + k;
+                if (darkColors.Count < 30) return "颜色键数量异常: " + darkColors.Count;
+                return null;
+            }));
+
             var failed = 0;
             var lines = new List<string>();
             foreach (var r in results)

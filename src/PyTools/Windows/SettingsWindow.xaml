@@ -149,6 +149,23 @@
                                      Foreground="{DynamicResource Text.Primary}"
                                      LostFocus="OnPageStepCommitted" KeyDown="OnPageStepKeyDown"/>
                         </Grid>
+                        <Grid Margin="0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="130"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="主题" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource Text.Secondary}"/>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                <RadioButton x:Name="ThemeLightRadio" GroupName="V2Theme" Content="浅色"
+                                             Margin="8,0,0,0" Checked="OnThemeChanged" Unchecked="OnThemeChanged"/>
+                                <RadioButton x:Name="ThemeDarkRadio" GroupName="V2Theme" Content="深色"
+                                             Margin="8,0,0,0" Checked="OnThemeChanged" Unchecked="OnThemeChanged"/>
+                                <RadioButton x:Name="ThemeSystemRadio" GroupName="V2Theme" Content="跟随系统"
+                                             Margin="8,0,0,0" Checked="OnThemeChanged" Unchecked="OnThemeChanged"
+                                             ToolTip="按 Windows 设置（设置 &gt; 个性化 &gt; 颜色）的应用模式；启动与切换时读取一次"/>
+                            </StackPanel>
+                        </Grid>
                         <CheckBox x:Name="LiteModeCheck" Content="简洁模式（不透明方角、无动效；重启生效）"
                                   Margin="0,4"
                                   Checked="OnLiteModeChanged" Unchecked="OnLiteModeChanged"/>

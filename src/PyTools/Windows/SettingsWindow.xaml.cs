@@ -80,6 +80,9 @@ namespace PyTools.Windows
             PinyinCheck.IsChecked = _config.PinyinSearch;
             PageStepBox.Text = _config.PageStep.ToString();
             LiteModeCheck.IsChecked = _config.LiteMode;
+            ThemeLightRadio.IsChecked = _config.Theme != "dark" && _config.Theme != "system";
+            ThemeDarkRadio.IsChecked = _config.Theme == "dark";
+            ThemeSystemRadio.IsChecked = _config.Theme == "system";
             // 右键菜单与自启以系统实况为准（意图 ≠ 实况）
             ContextMenuCheck.IsChecked = ContextMenuRegistry.Configured();
             AutoStartCheck.IsChecked = Startup.IsApplied();
@@ -343,6 +346,21 @@ namespace PyTools.Windows
         {
             if (!_loaded) return;
             _config.SaveLiteMode(LiteModeCheck.IsChecked == true); // 重启生效
+        }
+
+        /// <summary>
+        /// 主题三态（浅色/深色/跟随系统）：点击即写配置并热切换（App.ApplyTheme 重挂字典，
+        /// DynamicResource 全应用刷新）。Checked/Unchecked 都会进来（同组单选切换时成对触发），
+        /// 统一按当前勾选态落值，天然幂等。
+        /// </summary>
+        private void OnThemeChanged(object sender, RoutedEventArgs e)
+        {
+            if (!_loaded) return;
+            var theme = ThemeDarkRadio.IsChecked == true ? "dark"
+                      : ThemeSystemRadio.IsChecked == true ? "system"
+                      : "light";
+            _config.SaveTheme(theme);
+            ((PyTools.App)Application.Current).ApplyTheme();
         }
 
         private void OnContextMenuChanged(object sender, RoutedEventArgs e)
