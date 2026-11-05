@@ -606,6 +606,8 @@ namespace PyTools.Views
         private void SetStatus(string text, string kind)
         {
             StatusText.Text = text;
+            // 状态栏单行显示，长文本会被截断出省略号：悬停气泡给全文
+            StatusText.ToolTip = string.IsNullOrEmpty(text) ? null : text;
             string key;
             switch (kind)
             {

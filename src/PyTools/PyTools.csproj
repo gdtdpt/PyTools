@@ -141,6 +141,7 @@
     <Compile Include="Core\CronExpr.cs" />
     <Compile Include="Core\RegexTester.cs" />
     <Compile Include="Core\DiffEngine.cs" />
+    <Compile Include="Core\AiClient.cs" />
     <Compile Include="Core\TextFileLoader.cs" />
     <Compile Include="Native\NativeMethods.cs" />
     <Compile Include="Native\HotkeyParser.cs" />

@@ -4,7 +4,7 @@
              xmlns:views="clr-namespace:PyTools.Views">
     <!-- 正则测试视图（M4，T5）：左测试文本 + 右三块结果同屏（匹配列表/全文高亮/替换结果，2026-11-04 方案 A 拍板）。
          工具固定尺寸模式（860×620，App 层通用机制）；标志位 4 个 CheckBox（g 默认开）；
-         匹配列表点选联动：滚动定位 + 闪烁标注（v1 没有的增强）。AI 生成暂缓（AI 批首个补上）。
+         匹配列表点选联动：滚动定位 + 闪烁标注（v1 没有的增强）。AI 生成走动作面板（AiClient，M4 AI 批）。
          键位照全局约定：Ctrl+Enter 动作面板 / Esc 由窗口级路由。 -->
     <Border x:Name="RootBorder"
             Background="{DynamicResource Bg.Window}"

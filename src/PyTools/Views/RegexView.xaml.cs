@@ -13,11 +13,13 @@ namespace PyTools.Views
     /// <summary>
     /// 正则测试视图（M4，T5）：表达式 + 替换串 + 4 标志位 → 左测试文本、右三块结果同屏实时刷新（方案 A）。
     /// 渲染逻辑对齐 v1 tools/regex-tool（等待/无效/无匹配三态文案照搬）；增强 = 匹配列表点选联动
-    /// （点某条 → 高亮区滚动定位 + 闪烁标注）。动作面板复用 Views/ActionPanel；键位照全局约定。
+    /// （点某条 → 高亮区滚动定位 + 闪烁标注）。AI 生成走动作面板（M4 AI 批第一个消费者，共用 AiClient）；
+    /// 服务可达性只认真实请求结果，状态栏按请求生命周期呈现（无常驻徽标，2026-11-05 拍板）。
     /// </summary>
     public partial class RegexView : UserControl, ISearchFocusable
     {
         private bool _actionMode;
+        private bool _generating;          // AI 请求进行中（不可重入）
         private DispatcherTimer _flashTimer; // 点选联动的闪烁还原（单发）
         private Run _flashingRun;
 
@@ -262,7 +264,10 @@ namespace PyTools.Views
         private void SetStatus(string kind, string message)
         {
             StatusText.Text = message;
+            // 状态栏单行显示，长文本（如 AI 的 reason）会被截断出省略号：悬停气泡给全文
+            StatusText.ToolTip = string.IsNullOrEmpty(message) ? null : message;
             StatusText.Foreground = kind == "err" ? (Brush)FindResource("Text.Error")
+                : kind == "ok" ? (Brush)FindResource("Accent")
                 : (Brush)FindResource("Text.Placeholder");
         }
 
@@ -330,6 +335,8 @@ namespace PyTools.Views
                 new ActionItem("copy-replaced", "复制替换结果", "R", ReplaceResult.Text.Length > 0
                     && ReplaceResult.Text != "没有可替换的匹配" && ReplaceResult.Text != "替换后为空"),
                 new ActionItem("copy-text", "复制测试文本", "T", TestBox.Text.Length > 0),
+                // AI 未配置时不列出（配置级状态用确定性载体表达）；生成中不可重入
+                new ActionItem("ai-generate", "AI 生成正则", "A", !_generating && AiClient.Status().Available),
             };
         }
 
@@ -352,8 +359,62 @@ namespace PyTools.Views
             if (actionId == "copy-pattern") CopyWithStatus(ExprBox.Text.Trim(), "没有可复制的表达式", "已复制表达式");
             else if (actionId == "copy-replaced") CopyWithStatus(ReplaceResult.Text, "没有可复制的替换结果", "已复制替换结果");
             else if (actionId == "copy-text") CopyWithStatus(TestBox.Text, "测试文本为空", "已复制测试文本");
+            else if (actionId == "ai-generate") { ExitActionModeInternal(); StartAiGenerate(); return; }
             // 执行后即退出动作态（与其他视图语义一致）
             ExitActionModeInternal();
+        }
+
+        // ---- AI 生成（v1 regex-tool generateAi() 语义）----
+
+        private async void StartAiGenerate()
+        {
+            if (_generating) return;
+            var prompt = TestBox.Text.Trim();
+            if (prompt.Length == 0)
+            {
+                SetStatus("err", "请先把目标或样例写到测试文本里，再让 AI 生成");
+                TestBox.Focus();
+                return;
+            }
+            var status = AiClient.Status();
+            if (!status.Available)
+            {
+                SetStatus("err", "AI 不可用: " + status.Reason);
+                return;
+            }
+            _generating = true;
+            SetStatus(null, "AI 生成中…");
+            try
+            {
+                var result = await AiClient.GenerateRegexAsync(prompt);
+                if (result.Ok)
+                {
+                    // 先设标志位再填表达式（最后一次 TextChanged 用完整状态刷新三块结果）
+                    FlagGlobal.IsChecked = result.Flags.Contains("g");
+                    FlagIgnoreCase.IsChecked = result.Flags.Contains("i");
+                    FlagMultiline.IsChecked = result.Flags.Contains("m");
+                    FlagDotAll.IsChecked = result.Flags.Contains("s");
+                    ExprBox.Text = result.Pattern;
+                    Update(); // 表达式与原值相同时 TextChanged 不触发，手动兜底
+                    SetStatus("ok", "AI 已生成 · " + result.Model + " · 置信度 " + result.Confidence
+                        + (result.Reason.Length > 0 ? " · " + result.Reason : ""));
+                }
+                else
+                {
+                    // 请求类失败（超时/网络/HTTP）→ 指路设置窗口换模型；格式类失败不指（换模型无用）
+                    var text = result.Error;
+                    if (result.RequestFailed) text += "（可在设置中更换模型）";
+                    SetStatus("err", "AI 生成失败: " + text);
+                }
+            }
+            catch (Exception ex)
+            {
+                SetStatus("err", "AI 生成失败: " + ex.Message);
+            }
+            finally
+            {
+                _generating = false;
+            }
         }
 
         // ---- 键位 ----

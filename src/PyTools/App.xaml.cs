@@ -108,6 +108,7 @@ namespace PyTools
             }
 
             Logger.Init(AppDirectory, debug);
+            AiClient.Initialize(AppDirectory); // AI 共享层定位 ai-local.json（exe 旁，部署手工放置）
 
             // S10 补充：清理 v1 遗留的自启注册表残留（键名随版本漂移，v1 升级后删不到旧键）
             var legacyRuns = PyTools.Core.Startup.CleanupLegacy();
@@ -279,6 +280,7 @@ namespace PyTools
                             if (_diffWindow != null) _diffWindow.DebugPreload(_debugDiffLeft, _debugDiffRight);
                         });
                     }
+                    else if (args.Contains("--settings")) OpenSettings(); // 调试/自验开关：启动即开设置窗口
                     else ShowSummon();
                     if (_debugQuery != null)
                     {

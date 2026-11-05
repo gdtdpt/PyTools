@@ -1039,6 +1039,185 @@ namespace PyTools.Core
                 return null;
             }));
 
+            // ---- AI 共享层（M4 AI 批，AiClient 离线部分；网络请求不进自测）----
+
+            results.Add(Test("AiClient：Status 六态逐项给原因", () =>
+            {
+                var dir = Path.Combine(Path.GetTempPath(), "pytools-selftest-ai-" + Guid.NewGuid().ToString("N"));
+                try
+                {
+                    Directory.CreateDirectory(dir);
+                    string localPath = Path.Combine(dir, "ai-local.json");
+                    if (AiClient.Status(dir).Available || AiClient.Status(dir).Reason != "未启用")
+                        return "缺配置应判 未启用";
+                    File.WriteAllText(localPath, "{\"enabled\":true}");
+                    if (AiClient.Status(dir).Reason != "provider 不支持") return "缺 provider 应判 provider 不支持";
+                    File.WriteAllText(localPath, "{\"enabled\":true,\"provider\":\"internal-openai-compatible\"}");
+                    if (AiClient.Status(dir).Reason != "服务地址缺失") return "缺 baseUrl 应判 服务地址缺失";
+                    File.WriteAllText(localPath, "{\"enabled\":true,\"provider\":\"internal-openai-compatible\",\"baseUrl\":\"http://x\"}");
+                    if (AiClient.Status(dir).Reason != "模型缺失") return "缺 model 应判 模型缺失";
+                    File.WriteAllText(localPath, "{\"enabled\":true,\"provider\":\"internal-openai-compatible\",\"baseUrl\":\"http://x\",\"model\":\"m\"}");
+                    if (AiClient.Status(dir).Reason != "密钥缺失") return "缺 apiKey 应判 密钥缺失";
+                    File.WriteAllText(localPath, "{\"enabled\":true,\"provider\":\"internal-openai-compatible\",\"baseUrl\":\"http://x\",\"model\":\"m\",\"apiKey\":\"k\"}");
+                    if (!AiClient.Status(dir).Available) return "全字段齐应可用";
+                    // v1 合并语义：config.json 的 ai.enabled 也能点亮
+                    File.WriteAllText(localPath, "{\"provider\":\"internal-openai-compatible\",\"baseUrl\":\"http://x\",\"model\":\"m\",\"apiKey\":\"k\"}");
+                    File.WriteAllText(Path.Combine(dir, "config.json"), "{\"ai\":{\"enabled\":true}}");
+                    if (!AiClient.Status(dir).Available) return "config.json ai.enabled 合并判断失效";
+                    return null;
+                }
+                finally { try { Directory.Delete(dir, true); } catch { } }
+            }));
+
+            results.Add(Test("AiClient：请求体构建（tools/tool_choice 可关、max_tokens、temperature）", () =>
+            {
+                var cfg = new AiClient.AiLocalConfig
+                {
+                    Model = "m1", BaseUrl = "http://x/", ApiKey = "k",
+                    Temperature = 0.2, MaxTokens = 512,
+                };
+                var serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+                var withTools = serializer.Serialize(AiClient.BuildChatPayload(cfg, "目标", true));
+                if (!withTools.Contains("\"tool_choice\"")) return "tools 开时缺 tool_choice";
+                if (!withTools.Contains("regex_generate")) return "缺函数名";
+                if (!withTools.Contains("\"max_tokens\":512")) return "max_tokens 未带上";
+                var noTools = serializer.Serialize(AiClient.BuildChatPayload(cfg, "目标", false));
+                if (noTools.Contains("tool_choice") || noTools.Contains("tools")) return "tools 关时不应出现 tools 字段";
+                if (!noTools.Contains("\"temperature\":0.2")) return "temperature 默认 0.2";
+                return null;
+            }));
+
+            results.Add(Test("AiClient：响应解析 tool_calls 路径 + flags 过滤", () =>
+            {
+                var serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+                var args = new Dictionary<string, object>
+                {
+                    { "pattern", @"\d+" }, { "flags", new object[] { "g", "x", "i" } },
+                    { "confidence", 90 }, { "reason", "数字序列" },
+                };
+                var raw = serializer.Serialize(new Dictionary<string, object>
+                {
+                    {
+                        "choices", new object[]
+                        {
+                            new Dictionary<string, object>
+                            {
+                                {
+                                    "message", new Dictionary<string, object>
+                                    {
+                                        {
+                                            "tool_calls", new object[]
+                                            {
+                                                new Dictionary<string, object>
+                                                {
+                                                    { "function", new Dictionary<string, object> { { "arguments", serializer.Serialize(args) } } },
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+                var parsed = AiClient.ParseResponseBody(raw);
+                if (parsed.Error.Length > 0) return "tool_calls 解析报错: " + parsed.Error;
+                if (parsed.Pattern != @"\d+") return "pattern = " + parsed.Pattern;
+                if (parsed.Flags.Count != 2 || parsed.Flags[0] != "g" || parsed.Flags[1] != "i") return "flags 应过滤为 g,i";
+                if (parsed.Confidence != 90 || parsed.Reason != "数字序列") return "confidence/reason 丢失";
+                return null;
+            }));
+
+            results.Add(Test("AiClient：响应解析 content JSON（围栏）路径", () =>
+            {
+                var content = "```json\n{\"pattern\":\"[a-z]+\",\"flags\":[\"i\"],\"confidence\":50,\"reason\":\"字母\"}\n```";
+                var raw = "{\"choices\":[{\"message\":{\"content\":" +
+                          new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(content) + "}}]}";
+                var parsed = AiClient.ParseResponseBody(raw);
+                if (parsed.Error.Length > 0) return "content JSON 解析报错: " + parsed.Error;
+                if (parsed.Pattern != "[a-z]+" || parsed.Confidence != 50) return "pattern/confidence 不符";
+                return null;
+            }));
+
+            results.Add(Test("AiClient：响应解析 ```regex 围栏与行内正则兜底", () =>
+            {
+                var fence = AiClient.ParseContent("```regex\nabc\\s+\n```");
+                if (fence == null || fence.Pattern != "abc\\s+") return "围栏路径: " + (fence == null ? "null" : fence.Pattern);
+                var labeled = AiClient.ParseContent("```\nregex\n\\d{4}\n```");
+                if (labeled == null || labeled.Pattern != "\\d{4}") return "regex 标签行未跳过";
+                var inline = AiClient.ParseContent("  \\d{4}-\\d{2} 表示年月");
+                if (inline == null || inline.Pattern != "\\d{4}-\\d{2} 表示年月") return "行内兜底: " + (inline == null ? "null" : inline.Pattern);
+                return null;
+            }));
+
+            results.Add(Test("AiClient：服务端 error 提取与非 JSON 判定", () =>
+            {
+                var detail = AiClient.ParseResponseBody("{\"error\":{\"message\":\"余额不足\"}}");
+                if (detail.Error != "余额不足") return "error.message 未提取: " + detail.Error;
+                var codeOnly = AiClient.ParseResponseBody("{\"error\":{\"code\":\"rate_limited\"}}");
+                if (codeOnly.Error != "rate_limited") return "error.code 未提取";
+                var notJson = AiClient.ParseResponseBody("not json at all");
+                if (notJson.Error != "AI 返回不是 JSON") return "非 JSON 判定: " + notJson.Error;
+                var noPattern = AiClient.ParseResponseBody("{\"choices\":[{\"message\":{\"content\":\"普通文本\"}}]}");
+                if (noPattern.Error != "AI 返回内容缺少 pattern") return "缺 pattern 判定: " + noPattern.Error;
+                return null;
+            }));
+
+            results.Add(Test("AiClient：/models 清单解析（提取/去重/畸形）", () =>
+            {
+                var ok = AiClient.ParseModelList("{\"data\":[{\"id\":\"b-model\"},{\"id\":\"a-model\"},{\"id\":\"b-model\"},{},{}]}");
+                if (ok.Error.Length > 0) return "正常清单报错: " + ok.Error;
+                if (ok.Models.Count != 2 || ok.Models[0] != "a-model" || ok.Models[1] != "b-model") return "清单应为排序去重的 2 项; count=" + ok.Models.Count;
+                var empty = AiClient.ParseModelList("{\"data\":[]}");
+                if (empty.Error.Length > 0 || empty.Models.Count != 0) return "空清单应成功且为空";
+                var bad = AiClient.ParseModelList("oops");
+                if (bad.Error != "AI 返回不是 JSON") return "畸形响应判定: " + bad.Error;
+                var err = AiClient.ParseModelList("{\"error\":{\"message\":\"denied\"}}");
+                if (err.Error != "denied") return "服务端错误未透传";
+                return null;
+            }));
+
+            results.Add(Test("AiClient：tool_choice 降级判断（2026-11-05 真机错误文本）", () =>
+            {
+                // DeepSeek 思考模型实测 400 错误体，Request 会把该文本包进 WebException.Message
+                if (!AiClient.IsToolChoiceError("Thinking mode does not support this tool_choice (request_id: b1cab976-e0e5-41a1-82a2-0b330434)")) return "真机错误文本未命中降级";
+                if (!AiClient.IsToolChoiceError("{\"error\":{\"message\":\"tool_choice is not supported\"}}")) return "错误 JSON 文本未命中降级";
+                if (AiClient.IsToolChoiceError("连接超时（30s）")) return "超时错误不应触发降级";
+                if (AiClient.IsToolChoiceError("无法解析服务地址")) return "网络错误不应触发降级";
+                if (AiClient.IsToolChoiceError(null)) return "null 不应命中";
+                return null;
+            }));
+
+            results.Add(Test("AiClient：SelectModel 写回保留未知键 + 只读失败", () =>
+            {
+                var dir = Path.Combine(Path.GetTempPath(), "pytools-selftest-ai-" + Guid.NewGuid().ToString("N"));
+                try
+                {
+                    Directory.CreateDirectory(dir);
+                    var path = Path.Combine(dir, "ai-local.json");
+                    File.WriteAllText(path, "{\"enabled\":true,\"model\":\"a\",\"customKey\":123}");
+                    if (AiClient.SelectModel("b", dir) != null) return "正常写回应成功";
+                    var after = File.ReadAllText(path);
+                    if (!after.Contains("\"model\":\"b\"")) return "model 未写回: " + after;
+                    if (!after.Contains("customKey")) return "未知键丢失";
+                    if (AiClient.CurrentModel(dir) != "b") return "CurrentModel 读不到新值";
+                    File.SetAttributes(path, FileAttributes.ReadOnly);
+                    var error = AiClient.SelectModel("c", dir);
+                    if (error == null) return "只读文件应报错";
+                    return null;
+                }
+                finally
+                {
+                    try
+                    {
+                        var path = Path.Combine(dir, "ai-local.json");
+                        if (File.Exists(path)) File.SetAttributes(path, FileAttributes.Normal);
+                        Directory.Delete(dir, true);
+                    }
+                    catch { }
+                }
+            }));
+
             var failed = 0;
             var lines = new List<string>();
             foreach (var r in results)

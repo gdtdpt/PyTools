@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -25,16 +26,42 @@ namespace PyTools.Windows
         private TextBox _captureBox;   // 正在捕获的输入框（null = 未在捕获）
         private TextBlock _captureHint;
 
+        // AI 模型分组：后台拉取期间的填充抑制 + 当前选中（回滚基准）+ 拉取序号（刷新竞态）
+        private bool _aiPopulating;
+        private string _aiCurrentModel = "";
+        private int _aiFetchSeq;
+
         public SettingsWindow(AppConfig config, AppIndex index, Func<string, string> hotkeyApplier,
             Func<string, bool, string> clipboardHotkeyApplier, Func<string> positionResetter)
         {
             InitializeComponent();
+            // 窗口为定高布局（分栏后内容分页显示），仍按工作区封顶，兼顾小屏/缩放
+            MaxHeight = Math.Max(480, SystemParameters.WorkArea.Height - 40);
             _config = config;
             _index = index;
             _hotkeyApplier = hotkeyApplier;
             _clipboardHotkeyApplier = clipboardHotkeyApplier;
             _positionResetter = positionResetter;
             SourceInitialized += (s, e) => SetDarkTitleBar();
+        }
+
+        // ---- 分类导航（2026-11-05 分栏改造）----
+
+        /// <summary>左侧分类切换：只改可见性，各页的表单与「点击即生效」逻辑完全不动。</summary>
+        private void OnNavChanged(object sender, RoutedEventArgs e)
+        {
+            if (PageGeneral == null) return; // XAML 解析期（IsChecked 初值）其他页字段尚未创建
+            var radio = sender as RadioButton;
+            ShowPage(radio != null ? radio.Tag as string : "general");
+        }
+
+        private void ShowPage(string tag)
+        {
+            PageGeneral.Visibility = tag == "general" ? Visibility.Visible : Visibility.Collapsed;
+            PageClipboard.Visibility = tag == "clipboard" ? Visibility.Visible : Visibility.Collapsed;
+            PageContextMenu.Visibility = tag == "contextmenu" ? Visibility.Visible : Visibility.Collapsed;
+            PageAi.Visibility = tag == "ai" ? Visibility.Visible : Visibility.Collapsed;
+            PageApps.Visibility = tag == "apps" ? Visibility.Visible : Visibility.Collapsed;
         }
 
         private void SetDarkTitleBar()
@@ -61,6 +88,10 @@ namespace PyTools.Windows
             RefreshClipboardSection();
             RefreshCustomList();
             _loaded = true;
+            RefreshAiModels(); // 必须在 _loaded 之后：其入口有 !_loaded 守卫
+            // XAML 里 IsChecked="True" 的 Checked 事件早于其他页字段创建，被 OnNavChanged 守卫丢弃：
+            // 这里按当前选中项显式落位（默认「常规」）
+            ShowPage("general");
         }
 
         private void RefreshClipboardSection()
@@ -414,6 +445,101 @@ namespace PyTools.Windows
             }
             try { System.Diagnostics.Process.Start("explorer.exe", "/select,\"" + path + "\""); }
             catch (Exception ex) { SetHint(CustomHint, "打开失败：" + ex.Message); }
+        }
+
+        // ---- AI 模型（M4 AI 批：清单服务端拉取，选择写回 ai-local.json，点击即生效）----
+
+        private void OnAiModelsRefresh(object sender, RoutedEventArgs e)
+        {
+            RefreshAiModels();
+        }
+
+        private void RefreshAiModels()
+        {
+            if (!_loaded) return;
+            var status = AiClient.Status();
+            if (!status.Available)
+            {
+                _aiFetchSeq++; // 作废进行中的拉取
+                _aiPopulating = true;
+                AiModelBox.ItemsSource = null;
+                AiModelBox.IsEnabled = false;
+                _aiPopulating = false;
+                SetHint(AiHint, "AI 未配置：" + status.Reason + "（配置文件 ai-local.json 由部署放置于程序目录）");
+                return;
+            }
+            AiModelBox.IsEnabled = true;
+            var seq = ++_aiFetchSeq;
+            _aiCurrentModel = AiClient.CurrentModel();
+            SetHint(AiHint, "正在从服务地址获取模型列表…");
+            AiClient.ListModelsAsync().ContinueWith(delegate(Task<AiClient.ModelListResult> t)
+            {
+                if (seq != _aiFetchSeq || !IsLoaded) return; // 窗口已关或有更新的一次拉取
+                PopulateAiModels(t.Result);
+            }, TaskScheduler.FromCurrentSynchronizationContext());
+        }
+
+        private void PopulateAiModels(AiClient.ModelListResult result)
+        {
+            var models = new List<string>(result.Models);
+            // 当前 model 必须可见可选（不在清单 = 服务端已下线，仍保留兜底）
+            if (_aiCurrentModel.Length > 0 && !models.Contains(_aiCurrentModel))
+                models.Insert(0, _aiCurrentModel);
+
+            string hint;
+            if (result.Error.Length > 0 && result.Models.Count == 0)
+            {
+                hint = "获取模型列表失败: " + result.Error + "（可点「刷新」重试；不影响 AI 生成，仍用当前模型）";
+                if (models.Count == 0)
+                {
+                    _aiPopulating = true;
+                    AiModelBox.ItemsSource = null;
+                    _aiPopulating = false;
+                    SetHint(AiHint, hint);
+                    return;
+                }
+            }
+            else if (result.Error.Length > 0)
+            {
+                hint = "获取模型列表失败: " + result.Error + "（显示当前模型；不影响 AI 生成）";
+            }
+            else if (models.Count == 0)
+            {
+                hint = "服务端未返回任何模型（可点「刷新」重试）";
+            }
+            else
+            {
+                hint = "共 " + result.Models.Count + " 个模型，选择即生效";
+            }
+
+            _aiPopulating = true;
+            try
+            {
+                AiModelBox.ItemsSource = models;
+                AiModelBox.SelectedItem = _aiCurrentModel.Length > 0 && models.Contains(_aiCurrentModel)
+                    ? _aiCurrentModel : (models.Count > 0 ? models[0] : null);
+            }
+            finally { _aiPopulating = false; }
+            SetHint(AiHint, hint);
+        }
+
+        private void OnAiModelSelected(object sender, SelectionChangedEventArgs e)
+        {
+            if (!_loaded || _aiPopulating) return;
+            var model = AiModelBox.SelectedItem as string;
+            if (string.IsNullOrEmpty(model) || model == _aiCurrentModel) return;
+            var error = AiClient.SelectModel(model);
+            if (error != null)
+            {
+                // 写失败回滚显示（意图 ≠ 实况，Mino 教训）
+                _aiPopulating = true;
+                try { AiModelBox.SelectedItem = _aiCurrentModel; }
+                finally { _aiPopulating = false; }
+                SetHint(AiHint, "保存失败: " + error);
+                return;
+            }
+            _aiCurrentModel = model;
+            SetHint(AiHint, "已切换模型: " + model + "（下次生成即使用）");
         }
 
         private void OnClose(object sender, RoutedEventArgs e) { Close(); }
