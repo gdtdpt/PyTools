@@ -1,0 +1,22 @@
+# 构建产物
+bin/
+obj/
+.vs/
+*.user
+
+# 系统与编辑器
+.DS_Store
+Thumbs.db
+*.log
+.vscode/
+.idea/
+
+# 运行期数据（与 exe 同目录生成，不入库）
+config.json
+custom-apps.json
+clipboard-history.json
+clipboard-history/
+ai-local.json
+
+# 本地协作数据（agent 记忆与项目临时数据，不入库）
+.workbuddy/

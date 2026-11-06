@@ -5,7 +5,7 @@ using System.Runtime.InteropServices;
 using System.Windows;
 
 [assembly: AssemblyTitle("PyTools")]
-[assembly: AssemblyDescription("内网脱机 Win10 快速启动器（v2 重写版）")]
+[assembly: AssemblyDescription("内网脱机 Win10 快速启动器")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("")]
 [assembly: AssemblyProduct("PyTools")]
@@ -17,4 +17,4 @@ using System.Windows;
 [assembly: ThemeInfo(ResourceDictionaryLocation.None, ResourceDictionaryLocation.SourceAssembly)]
 [assembly: AssemblyVersion("2.0.0.0")]
 [assembly: AssemblyFileVersion("2.0.0.0")]
-[assembly: AssemblyInformationalVersion("2.0.0-dev1")]
+[assembly: AssemblyInformationalVersion("2.0.0-rc1")]

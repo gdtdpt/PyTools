@@ -1,10 +1,10 @@
-# PyTools v2 协作约定（AGENTS）
+# PyTools 协作约定（AGENTS）
 
-AI 代理在 `v2/` 下动手前必须读完本文件，同时读根目录 `AGENTS.md`（其硬性不变量**仅适用 v1/Electron 代码**）与 `docs/v2-plan.md`、`docs/v2-rewrite-matrix.md`。
+AI 代理动手前必须读完本文件，并按需读 `docs/v2-plan.md`、`docs/v2-rewrite-matrix.md` 与 `docs/conventions.md`、`docs/task-workflow.md`。
 
 ## 项目一句话
 
-PyTools v2：v1（Electron 启动器）的 .NET Framework 4.6.2 / WPF 重写版，单 exe 零部署，目标机为内网脱机 Win10 1709 x64。v1 冻结于 tag `v1-final`，仅修致命缺陷。
+PyTools：启动器 + 常用工具集，.NET Framework 4.6.2 / WPF，单 exe 零部署，目标机为内网脱机 Win10 1709 x64。前身是 Electron 版 PyTools（旧仓库 `pytools`，冻结于 tag `v1-final`，仅修致命缺陷）；本仓库由其 `v2/` 子目录剥离而来，提交历史连续。
 
 ## 硬性不变量（违反即返工）
 
@@ -35,11 +35,11 @@ PyTools v2：v1（Electron 启动器）的 .NET Framework 4.6.2 / WPF 重写版�
 ## 构建与自测
 
 ```powershell
-.\v2\tools\build.ps1 -Configuration Debug        # 构建
-.\v2\src\PyTools\bin\Debug\PyTools.exe --selftest # 逻辑自测（exit 0 = 全过）
-.\v2\src\PyTools\bin\Debug\PyTools.exe --debug    # 调试：启动即显示、禁失焦隐藏
-.\v2\src\PyTools\bin\Debug\PyTools.exe --debug --query=wx  # 调试 + 呼出即预填搜索词（UI 截图自验结果态）
-.\v2\src\PyTools\bin\Debug\PyTools.exe --settings          # 调试：启动即开设置窗口
+.\tools\build.ps1 -Configuration Debug        # 构建
+.\src\PyTools\bin\Debug\PyTools.exe --selftest # 逻辑自测（exit 0 = 全过）
+.\src\PyTools\bin\Debug\PyTools.exe --debug    # 调试：启动即显示、禁失焦隐藏
+.\src\PyTools\bin\Debug\PyTools.exe --debug --query=wx  # 调试 + 呼出即预填搜索词（UI 截图自验结果态）
+.\src\PyTools\bin\Debug\PyTools.exe --settings          # 调试：启动即开设置窗口
 ```
 
-同机测试 v2 前必须退出 v1（全局热键 / 单实例 / 注册表右键三处冲突）。
+同机测试前必须退出旧版 PyTools v1（全局热键 / 单实例 / 注册表右键三处冲突）。
