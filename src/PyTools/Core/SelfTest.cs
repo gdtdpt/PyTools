@@ -1554,6 +1554,20 @@ namespace PyTools.Core
                 return null;
             }));
 
+            results.Add(Test("Naming：截断气泡——被省略号截断才挂 ToolTip", () =>
+            {
+                var text = "依据：下单时间在中文业务语境通常指订单创建时刻，英文常用 placedAt / orderCreatedAt / createdAt 等命名";
+                var face = new Typeface("Microsoft YaHei UI");
+                var brush = System.Windows.Media.Brushes.Black;
+                if (!PyTools.Views.NamingView.IsTextTruncated(text, face, 12, brush, 1.0, 100))
+                    return "宽 100px 装不下长文本却判为未截断";
+                if (PyTools.Views.NamingView.IsTextTruncated("短文本", face, 12, brush, 1.0, 300))
+                    return "宽 300px 装得下短文本却判为截断";
+                if (PyTools.Views.NamingView.IsTextTruncated("", face, 12, brush, 1.0, 10))
+                    return "空文本应判为未截断";
+                return null;
+            }));
+
             var failed = 0;
             var lines = new List<string>();
             foreach (var r in results)

@@ -257,6 +257,39 @@ namespace PyTools.Views
             NoteText.Text = noteText;
             SummaryRow.Visibility = CoreText.Text.Length > 0 || noteText.Length > 0
                 ? Visibility.Visible : Visibility.Collapsed;
+            // 宽度要等本轮布局完成才准，放 Loaded 优先级刷新截断气泡
+            Dispatcher.BeginInvoke(new Action(() => UpdateTrimTooltip(NoteText)),
+                System.Windows.Threading.DispatcherPriority.Loaded);
+        }
+
+        // ---- 截断气泡：文本被省略号截断时才挂 ToolTip（常驻 tooltip 对未截断行是噪聒）----
+
+        private void OnNoteBlockLoaded(object sender, RoutedEventArgs e)
+        {
+            var tb = (TextBlock)sender;
+            tb.SizeChanged += (s, _) => UpdateTrimTooltip((TextBlock)s);
+            UpdateTrimTooltip(tb);
+        }
+
+        /// <summary>同字体实测文本宽度是否超过可视宽（纯函数，selftest 可离线测）。</summary>
+        internal static bool IsTextTruncated(string text, Typeface face, double fontSize,
+            Brush brush, double pixelsPerDip, double availableWidth)
+        {
+            if (string.IsNullOrEmpty(text) || availableWidth <= 0) return false;
+            var ft = new FormattedText(text, System.Globalization.CultureInfo.CurrentCulture,
+                FlowDirection.LeftToRight, face, fontSize, brush, pixelsPerDip);
+            return ft.Width > availableWidth + 0.5;
+        }
+
+        /// <summary>被截断才挂 ToolTip（全文），未截断清掉——常驻 tooltip 对未截断行是噪聒。</summary>
+        internal static void UpdateTrimTooltip(TextBlock tb)
+        {
+            string tip = null;
+            if (tb.ActualWidth > 0 && IsTextTruncated(tb.Text,
+                    new Typeface(tb.FontFamily, tb.FontStyle, tb.FontWeight, tb.FontStretch),
+                    tb.FontSize, tb.Foreground, VisualTreeHelper.GetDpi(tb).PixelsPerDip, tb.ActualWidth))
+                tip = tb.Text;
+            if (!ReferenceEquals(tb.ToolTip, tip)) tb.ToolTip = tip;
         }
 
         // ---- 列表渲染 ----
@@ -356,10 +389,12 @@ namespace PyTools.Views
         private void SetStatus(string kind, string message)
         {
             StatusText.Text = message;
-            StatusText.ToolTip = string.IsNullOrEmpty(message) ? null : message;
             StatusText.Foreground = kind == "err" ? (Brush)FindResource("Text.Error")
                 : kind == "ok" ? (Brush)FindResource("Accent")
                 : (Brush)FindResource("Text.Placeholder");
+            // 截断才挂 ToolTip（原为常驻全文，统一走截断判定）
+            Dispatcher.BeginInvoke(new Action(() => UpdateTrimTooltip(StatusText)),
+                System.Windows.Threading.DispatcherPriority.Loaded);
         }
 
         // ---- 动作面板（Ctrl+Enter，与启动器同一套约定）----
