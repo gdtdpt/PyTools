@@ -571,6 +571,44 @@ namespace PyTools.Core
                 return null;
             }));
 
+            results.Add(Test("内置命令：tools 工具列表入口与 FilterToolList 口径", () =>
+            {
+                var entry = BuiltinCommands.Match("tools");
+                if (entry == null || entry.CommandId != "tools") return "tools 入口未命中";
+                var cn = BuiltinCommands.Match("工具");
+                if (cn == null || cn.CommandId != "tools") return "中文别名「工具」未命中";
+
+                var all = BuiltinCommands.All();
+                var filtered = BuiltinCommands.FilterToolList("");
+                if (filtered.Count != all.Count) return "空查询应列全部";
+                foreach (var item in filtered)
+                    if (item.CommandId == "tools") return "工具列表不应包含自身";
+                if (!filtered.Any(e => e.CommandId == "clipboard")) return "工具清单缺剪贴板记录";
+                if (Pinyin.Ready)
+                {
+                    var initials = BuiltinCommands.FilterToolList("jtbjl");
+                    if (!initials.Any(e => e.CommandId == "clipboard")) return "工具列表拼音首字母未命中";
+                }
+                var cn2 = BuiltinCommands.FilterToolList("正则");
+                if (!cn2.Any(e => e.CommandId == "regex")) return "工具列表中文别名未命中";
+                var bySubtitle = BuiltinCommands.FilterToolList("json");
+                if (!bySubtitle.Any(e => e.CommandId == "format")) return "副标题子串未命中";
+                return null;
+            }));
+
+            results.Add(Test("内置命令：图标资源键全覆盖（Icons.xaml 与条目一一对应）", () =>
+            {
+                var icons = new ResourceDictionary { Source = new Uri("pack://application:,,,/Themes/Icons.xaml") };
+                foreach (var command in BuiltinCommands.All())
+                {
+                    if (command.IconKey.Length == 0) return "工具缺图标键: " + command.CommandId;
+                    if (!(icons[command.IconKey] is Geometry)) return "图标键无对应几何: " + command.IconKey;
+                }
+                var toolList = BuiltinCommands.Match("tools");
+                if (toolList.IconKey.Length != 0) return "工具列表入口不应有图标（走首字回退）";
+                return null;
+            }));
+
             results.Add(Test("StructuredFormats：JSON 格式化 2 空格 / 压缩（键序保持）", () =>
             {
                 var fmt = StructuredFormats.Process("{\"b\":1,\"a\":[1,2],\"s\":\"x\\n\\\"y\\\"\"}", "format", "auto", "2");

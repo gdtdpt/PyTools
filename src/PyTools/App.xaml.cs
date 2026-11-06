@@ -219,6 +219,7 @@ namespace PyTools
                     if (ReferenceEquals(content, _view))
                     {
                         if (_view.TryExitActionMode()) return;
+                        if (_view.TryExitToolListMode()) return; // 工具列表模式 → 普通搜索态（2026-11-06）
                         HideSummon();
                         return;
                     }
@@ -402,6 +403,11 @@ namespace PyTools
                     Source = new Uri("pack://application:,,,/Themes/Theme.Lite.xaml")
                 });
             }
+            // 图标资源：与主题字典同生命周期（清空重挂后必须补回）；Controls 仍最后挂
+            Resources.MergedDictionaries.Add(new ResourceDictionary
+            {
+                Source = new Uri("pack://application:,,,/Themes/Icons.xaml")
+            });
             // 控件隐式样式库：必须后挂，且与主题形态无关（控件圆角两形态一致）
             Resources.MergedDictionaries.Add(new ResourceDictionary
             {
@@ -1152,6 +1158,11 @@ namespace PyTools
             // 内置命令条目（M4 工具入口）：按 Kind 切视图或执行动作，不当作文件启动
             if (entry != null && entry.IsCommand)
             {
+                if (string.Equals(entry.CommandId, "tools", StringComparison.OrdinalIgnoreCase))
+                {
+                    _view.EnterToolListMode(); // 工具列表模式（2026-11-06，v1 tools 命令同款）
+                    return;
+                }
                 if (string.Equals(entry.CommandId, "vsc", StringComparison.OrdinalIgnoreCase)) ShowVsc();
                 else if (string.Equals(entry.CommandId, "clipboard", StringComparison.OrdinalIgnoreCase)) ShowClipboard(fromLauncher: true);
                 else if (string.Equals(entry.CommandId, "format", StringComparison.OrdinalIgnoreCase)) ShowFormat();

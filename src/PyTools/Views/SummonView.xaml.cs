@@ -22,10 +22,40 @@ namespace PyTools.Views
         public string Name { get { return Entry.Name; } }
         public string PathText { get { return string.IsNullOrEmpty(Entry.TargetPath) ? Entry.Path : Entry.TargetPath; } }
 
+        /// <summary>内置工具矢量图标（按 IconKey 从应用资源取 Themes/Icons.xaml 的 Geometry；一次性，不变化）。</summary>
+        public Geometry IconGeometry
+        {
+            get
+            {
+                if (Entry == null || Entry.IconKey.Length == 0 || Application.Current == null) return null;
+                return Application.Current.TryFindResource(Entry.IconKey) as Geometry;
+            }
+        }
+
+        /// <summary>首字头像可见性：图片与矢量图标都没有时显示（应用图标异步加载后自动隐藏）。</summary>
+        public Visibility FallbackVisible
+        {
+            get { return Icon == null && IconGeometry == null ? Visibility.Visible : Visibility.Collapsed; }
+        }
+
+        /// <summary>首字头像文字：标题首字符（v1 口径 title[0]，中文直接取首字）。</summary>
+        public string FallbackLetter
+        {
+            get { return string.IsNullOrEmpty(Entry.Name) ? "" : Entry.Name.Substring(0, 1); }
+        }
+
         public BitmapImage Icon
         {
             get { return _icon; }
-            set { _icon = value; if (PropertyChanged != null) PropertyChanged(this, new PropertyChangedEventArgs("Icon")); }
+            set
+            {
+                _icon = value;
+                if (PropertyChanged != null)
+                {
+                    PropertyChanged(this, new PropertyChangedEventArgs("Icon"));
+                    PropertyChanged(this, new PropertyChangedEventArgs("FallbackVisible")); // 首字头像让位
+                }
+            }
         }
 
         public string Badge
@@ -45,6 +75,7 @@ namespace PyTools.Views
         private ScrollViewer _scroll;
         private bool _actionMode;      // Ctrl+Enter 动作面板：独立浮层 + 自带过滤输入框
         private AppEntry _actionTarget; // 操作模式的目标条目
+        private bool _toolListMode;    // 工具列表模式（tools 条目回车进入）：列表只展示内置工具
 
         public SummonView()
         {
@@ -86,6 +117,7 @@ namespace PyTools.Views
             _toastTimer.Stop();
             Toast.Visibility = Visibility.Collapsed;
             ExitActionModeInternal();
+            ExitToolListModeInternal();
             SearchBox.Text = "";
             SetListVisible(false);
         }
@@ -104,6 +136,57 @@ namespace PyTools.Views
             if (!_actionMode) return;
             ExitActionModeInternal();
             RefreshResults();
+        }
+
+        // ---- 工具列表模式（2026-11-06，v1 tools 命令同款：tools 条目回车进入，Esc 分层退出）----
+
+        /// <summary>进入工具列表模式：清空查询、列表展示全部工具、placeholder 与提示条换口径。</summary>
+        public void EnterToolListMode()
+        {
+            _toolListMode = true;
+            SearchBox.Text = "";
+            PART_Placeholder.Text = "过滤工具…";
+            ModeBadge.Visibility = Visibility.Visible;
+            RefreshToolList();
+            SearchBox.Focus();
+        }
+
+        /// <summary>Esc 由 App 转问：工具列表模式先退回普通搜索态。返回是否已消费。</summary>
+        public bool TryExitToolListMode()
+        {
+            if (!_toolListMode) return false;
+            ExitToolListModeInternal();
+            return true;
+        }
+
+        private void ExitToolListModeInternal()
+        {
+            if (!_toolListMode) return;
+            _toolListMode = false;
+            PART_Placeholder.Text = "搜索应用…";
+            ModeBadge.Visibility = Visibility.Collapsed;
+            // 回普通搜索态（v1 exitToolListMode 口径）：清空查询并收起列表；
+            // 退模式只恢复空态，不保留过滤结果（避免残留半截列表）
+            SearchBox.Text = "";
+            SetListVisible(false);
+        }
+
+        /// <summary>工具列表数据源：BuiltinCommands.FilterToolList（空查询列全部，声明序）。无应用条目，图标全为同步矢量/首字。</summary>
+        private void RefreshToolList()
+        {
+            _generation++;
+            _items.Clear();
+            foreach (var entry in BuiltinCommands.FilterToolList(SearchBox.Text))
+                _items.Add(new ItemVM { Entry = entry });
+
+            PART_List.ItemsSource = null;
+            PART_List.ItemsSource = _items;
+            SetSelected(_items.Count > 0 ? 0 : -1, scrollIntoView: false);
+            UpdateBadges(FirstVisibleIndex());
+
+            EmptyHint.Text = "无匹配工具";
+            EmptyHint.Visibility = _items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            SetListVisible(true);
         }
 
         private void ExitActionModeInternal()
@@ -138,6 +221,7 @@ namespace PyTools.Views
         private void RefreshResults()
         {
             if (_actionMode) return; // 动作面板开启期间不重刷结果列表（面板内有独立过滤）
+            if (_toolListMode) { RefreshToolList(); return; } // 工具列表模式：独立数据源与空态文案
             var query = SearchBox.Text;
             var empty = string.IsNullOrWhiteSpace(query);
             if (empty)
@@ -211,6 +295,7 @@ namespace PyTools.Views
             var listVisible = !_actionMode && ListArea.Visibility == Visibility.Visible;
             HintBar.Visibility = listVisible ? Visibility.Visible : Visibility.Collapsed;
             if (!listVisible) return;
+            ModeBadge.Visibility = _toolListMode ? Visibility.Visible : Visibility.Collapsed;
             var hasActions = false;
             var sel = SelectedIndex();
             if (sel >= 0 && sel < _items.Count) hasActions = AvailableActionCount(_items[sel].Entry) > 0;

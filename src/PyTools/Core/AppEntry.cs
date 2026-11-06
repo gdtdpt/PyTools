@@ -20,6 +20,9 @@ namespace PyTools.Core
         public bool IsCommand;
         public string CommandId = "";
 
+        /// <summary>矢量图标资源键（Themes/Icons.xaml 的 Icon.<Id>；空 = 走列表行首字头像回退）。</summary>
+        public string IconKey = "";
+
         /// <summary>搜索词：小写关键词（name/targetName/targetFolder）。</summary>
         public List<string> Keywords = new List<string>();
 

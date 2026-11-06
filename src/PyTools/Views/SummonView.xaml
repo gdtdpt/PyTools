@@ -102,12 +102,34 @@
                                            Foreground="{DynamicResource Text.Placeholder}"
                                            FontSize="{DynamicResource Font.Secondary}"/>
                                 <Grid Grid.Column="1" VerticalAlignment="Center">
+                                    <!-- 图标三层回退（2026-11-06）：应用图片 → 工具矢量图标 → 首字头像（v1 口径） -->
                                     <Image Source="{Binding Icon}"
                                            Width="28" Height="28"
                                            Visibility="{Binding Icon, Converter={StaticResource NotNullToVisible}}"
                                            RenderOptions.BitmapScalingMode="HighQuality"/>
+                                    <Path Data="{Binding IconGeometry}"
+                                          Width="24" Height="24"
+                                          Stretch="Uniform"
+                                          Fill="{x:Null}"
+                                          Stroke="{DynamicResource Text.Secondary}"
+                                          StrokeThickness="1.5"
+                                          StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                          StrokeLineJoin="Round"
+                                          HorizontalAlignment="Center" VerticalAlignment="Center"
+                                          Visibility="{Binding IconGeometry, Converter={StaticResource NotNullToVisible}}"/>
+                                    <Border Width="28" Height="28"
+                                            CornerRadius="6"
+                                            Background="{DynamicResource Bg.ItemHover}"
+                                            BorderBrush="{DynamicResource Border.Input}"
+                                            BorderThickness="1"
+                                            Visibility="{Binding FallbackVisible}">
+                                        <TextBlock Text="{Binding FallbackLetter}"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                   FontSize="13" FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource Text.Secondary}"/>
+                                    </Border>
                                 </Grid>
-                                <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="0,0,10,0">
+                                <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="10,0,10,0">
                                     <TextBlock Text="{Binding Name}"
                                                FontSize="{DynamicResource Font.Base}"
                                                Foreground="{DynamicResource Text.Primary}"
@@ -147,6 +169,17 @@
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <StackPanel Grid.Column="0" Orientation="Horizontal" HorizontalAlignment="Left">
+                        <Border x:Name="ModeBadge"
+                                VerticalAlignment="Center"
+                                Margin="0,0,8,0"
+                                Background="{DynamicResource Accent.Soft}"
+                                CornerRadius="3"
+                                Padding="6,1"
+                                Visibility="Collapsed">
+                            <TextBlock Text="工具列表"
+                                       Foreground="{DynamicResource Accent}"
+                                       FontSize="{DynamicResource Font.Secondary}"/>
+                        </Border>
                         <TextBlock Text="打开"
                                    VerticalAlignment="Center"
                                    Foreground="{DynamicResource Text.Secondary}"
