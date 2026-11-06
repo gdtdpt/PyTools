@@ -7,8 +7,10 @@
             内部控件圆角保留（Radius.Control 不在此覆盖）。
     -->
 
-    <!-- 窗口底视觉：不透明纯色 + 方角 + 1px 边框增强轮廓 -->
-    <SolidColorBrush x:Key="Bg.Window" Color="#F7F8FA"/>
+    <!-- 窗口底视觉：方角 + 1px 边框增强轮廓。Bg.Window 不在此覆盖——基础主题的
+         Bg.Window 本就是不透明纯色（浅 #F7F8FA / 深 #1C2128），早期这里硬编码浅色值，
+         暗色+简洁组合会顶掉 Dark 的深色底，整窗发白、浅色文字全部不可见
+         （2026-11-06 用户截图反馈，16:30 段修复）。 -->
     <CornerRadius x:Key="Radius.Window">0</CornerRadius>
 
     <!-- 阴影：无效果 -->
