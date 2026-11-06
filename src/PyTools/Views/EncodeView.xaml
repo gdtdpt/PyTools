@@ -65,8 +65,8 @@
                          AcceptsReturn="True"
                          TextChanged="OnInputChanged"
                          VerticalScrollBarVisibility="Auto"
-                         HorizontalScrollBarVisibility="Auto"
-                         TextWrapping="NoWrap"
+                         HorizontalScrollBarVisibility="Disabled"
+                         TextWrapping="Wrap"
                          SpellCheck.IsEnabled="False"
                          CaretBrush="{DynamicResource Text.Primary}"/>
 
@@ -82,8 +82,8 @@
                          AcceptsReturn="True"
                          IsReadOnly="True"
                          VerticalScrollBarVisibility="Auto"
-                         HorizontalScrollBarVisibility="Auto"
-                         TextWrapping="NoWrap"
+                         HorizontalScrollBarVisibility="Disabled"
+                         TextWrapping="Wrap"
                          CaretBrush="{DynamicResource Text.Primary}"/>
 
                 <!-- 状态栏：左 = 处理状态/默认提示；右 = 操作键帽（可点呼出动作面板） -->

@@ -107,8 +107,8 @@
                                  Padding="6,4,6,4"
                                  SpellCheck.IsEnabled="False"
                                  VerticalScrollBarVisibility="Auto"
-                                 HorizontalScrollBarVisibility="Auto"
-                                 TextWrapping="NoWrap"
+                                 HorizontalScrollBarVisibility="Disabled"
+                                 TextWrapping="Wrap"
                                  TextChanged="OnInputChanged"/>
                     </Grid>
 

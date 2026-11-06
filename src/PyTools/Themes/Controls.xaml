@@ -215,6 +215,14 @@
                                       HorizontalScrollBarVisibility="Hidden"
                                       VerticalScrollBarVisibility="Hidden"/>
                     </Border>
+                    <ControlTemplate.Triggers>
+                        <!-- 默认 VerticalContentAlignment=Top（多行编辑区未局部设对齐）时让内容宿主纵向撑满：
+                             横向滚动条贴框底。否则 ScrollViewer 按内容收缩，超长单行的滚动条悬在首行下方
+                             （2026-11-06 用户截图反馈）。局部设 Center 的单行框不受影响。 -->
+                        <Trigger Property="VerticalContentAlignment" Value="Top">
+                            <Setter TargetName="PART_ContentHost" Property="VerticalAlignment" Value="Stretch"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
