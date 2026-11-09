@@ -117,12 +117,26 @@ namespace PyTools.Core
             catch (Exception ex) { Logger.Error("reset bounds failed: " + ex.Message); }
         }
 
-        /// <summary>呼出位置偏移写入（相对所在屏工作区原点，DIP）。与 SaveBounds 同步落盘（2026-11-09）。</summary>
+        /// <summary>呼出位置偏移写入（相对所在屏工作区原点，DIP）。NaN = 清除记忆。</summary>
         public void SaveSummonOffset(double offsetX, double offsetY)
         {
             SummonOffsetX = offsetX; SummonOffsetY = offsetY;
-            _raw["v2.summonOffsetX"] = offsetX;
-            _raw["v2.summonOffsetY"] = offsetY;
+            try
+            {
+                // JavaScriptSerializer 不支持 NaN，无值时必须删键而不是写 NaN
+                if (double.IsNaN(offsetX) || double.IsNaN(offsetY))
+                {
+                    _raw.Remove("v2.summonOffsetX");
+                    _raw.Remove("v2.summonOffsetY");
+                }
+                else
+                {
+                    _raw["v2.summonOffsetX"] = offsetX;
+                    _raw["v2.summonOffsetY"] = offsetY;
+                }
+                WriteBack();
+            }
+            catch (Exception ex) { Logger.Error("save summon offset failed: " + ex.Message); }
         }
 
         public void SaveLiteMode(bool lite)

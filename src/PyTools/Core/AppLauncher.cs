@@ -50,10 +50,13 @@ namespace PyTools.Core
             if (!IsKnownApp(target, roots, custom))
                 return new OpenResult { Ok = false, Message = "应用不在允许的应用目录内" };
 
-            // 启动前确认目标存在：登记条目的目标被删除时移除记录，其余启动失败保留记录（v1 1.8.1）
-            if (!File.Exists(target))
+            // 启动前确认目标存在：登记条目的目标被删除时移除记录，其余启动失败保留记录（v1 1.8.1）。
+            // lnk 本体存在不代表目标存在，有展开目标时按展开目标判定。
+            var realTarget = RealTarget(entry);
+            var existsPath = realTarget ?? target;
+            if (!File.Exists(existsPath))
             {
-                var deadName = Path.GetFileName(target);
+                var deadName = Path.GetFileName(existsPath);
                 if (custom != null && custom.Remove(entry.TargetPath))
                 {
                     return new OpenResult
@@ -85,15 +88,20 @@ namespace PyTools.Core
                 }
             }
 
-            // 带参：登记条目留存 args，quote-aware 分词后 spawn（v1 splitArgs 语义）
+            // 带参：必须对解析后的真实目标 spawn。扫描条目的 Path 是 .lnk 本身
+            // （参数在 lnk 内），CreateProcess 直接对 .lnk 会报 193（ERROR_BAD_EXE_FORMAT）；
+            // Chrome 的开始菜单快捷方式即带 --source-shortcut-location=start-menu。
+            var spawnFile = realTarget ?? target;
+            var shellFallback = realTarget == null &&
+                string.Equals(Path.GetExtension(spawnFile), ".lnk", StringComparison.OrdinalIgnoreCase);
             try
             {
                 var start = new ProcessStartInfo
                 {
-                    FileName = target,
+                    FileName = spawnFile,
                     Arguments = JoinArgs(SplitArgs(rawArgs)),
-                    UseShellExecute = false,
-                    WorkingDirectory = string.IsNullOrEmpty(entry.TargetDir) ? Path.GetDirectoryName(target) : entry.TargetDir,
+                    UseShellExecute = shellFallback,
+                    WorkingDirectory = string.IsNullOrEmpty(entry.TargetDir) ? Path.GetDirectoryName(spawnFile) : entry.TargetDir,
                     CreateNoWindow = true
                 };
                 Process.Start(start);
@@ -103,6 +111,22 @@ namespace PyTools.Core
             {
                 return new OpenResult { Ok = false, Message = SpawnErrorText(ex) };
             }
+        }
+
+        /// <summary>
+        /// 解析后的真实启动目标（.lnk 已展开）；不可用时返回 null。
+        /// 扫描条目 Path=lnk、TargetPath=真实 exe；登记条目两者相同。
+        /// </summary>
+        public static string RealTarget(AppEntry entry)
+        {
+            var targetPath = (entry.TargetPath ?? "").Trim();
+            if (targetPath.Length == 0) return null;
+            try { targetPath = Path.GetFullPath(targetPath); }
+            catch { return null; }
+            // 未展开的环境变量路径（%ProgramFiles%\…）不是有效目标
+            if (targetPath.IndexOf('%') >= 0) return null;
+            if (CustomApps.SamePath(targetPath, entry.Path)) return null;
+            return targetPath;
         }
 
         /// <summary>Windows 命令行简单分词：空白分隔，双引号内保留空白（v1 splitArgs 逐字符移植）。</summary>

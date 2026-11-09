@@ -231,6 +231,49 @@ namespace PyTools.Core
                 finally { try { File.Delete(path); } catch { } }
             }));
 
+            results.Add(Test("启动：lnk 带参条目的启动依据取解析后真实目标", () =>
+            {
+                var lnk = new AppEntry
+                {
+                    Name = "Google Chrome",
+                    Path = @"C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Google Chrome.lnk",
+                    TargetPath = @"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                    Args = "--source-shortcut-location=start-menu"
+                };
+                var real = AppLauncher.RealTarget(lnk);
+                if (real == null || !real.EndsWith("chrome.exe", StringComparison.OrdinalIgnoreCase))
+                    return "lnk 未取到真实目标: " + (real ?? "null");
+
+                // 登记条目与扫描到的 exe 条目 Path==TargetPath，不应产生额外跳转
+                var exe = new AppEntry { Path = @"C:\Apps\demo.exe", TargetPath = @"C:\Apps\demo.exe" };
+                if (AppLauncher.RealTarget(exe) != null) return "exe 条目不应返回真实目标";
+
+                // 未展开环境变量 / 空目标 → 不可用
+                var env = new AppEntry { Path = @"C:\x\a.lnk", TargetPath = @"%ProgramFiles%\Google\Chrome\Application\chrome.exe" };
+                if (AppLauncher.RealTarget(env) != null) return "未展开环境变量被当作真实目标";
+                if (AppLauncher.RealTarget(new AppEntry { Path = @"C:\x\a.lnk" }) != null) return "空目标应返回 null";
+                return null;
+            }));
+
+            results.Add(Test("启动：lnk 目标缺失按「目标不存在」处理（不再对 lnk 报 193）", () =>
+            {
+                var root = Path.Combine(Path.GetTempPath(), "pytools-selftest-lnk-" + Guid.NewGuid().ToString("N"));
+                try
+                {
+                    Directory.CreateDirectory(root);
+                    var lnk = Path.Combine(root, "Chrome.lnk");
+                    File.WriteAllText(lnk, "dummy lnk");       // 只为让 lnk 本体存在
+                    var gone = Path.Combine(root, "chrome.exe"); // 目标不存在
+                    var entry = new AppEntry { Name = "Chrome", Path = lnk, TargetPath = gone, Args = "--source-shortcut-location=start-menu" };
+                    var custom = new CustomApps(Path.Combine(Path.GetTempPath(), "pytools-selftest-none-" + Guid.NewGuid().ToString("N") + ".json"));
+                    var result = AppLauncher.Open(entry, new List<string> { root }, custom);
+                    if (result == null) return "目标缺失却报告启动成功";
+                    if (result.Ok) return "目标缺失不应返回 Ok";
+                    return result.Message.Contains("目标不存在") ? null : "文案: " + result.Message;
+                }
+                finally { try { Directory.Delete(root, true); } catch { } }
+            }));
+
             results.Add(Test("授权：IsKnownApp 根目录前缀判定", () =>
             {
                 var root = Path.Combine(Path.GetTempPath(), "pytools-selftest-known-" + Guid.NewGuid().ToString("N"));
