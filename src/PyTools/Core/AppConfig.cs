@@ -21,6 +21,9 @@ namespace PyTools.Core
         public List<string> AppDirs = new List<string>();
         public bool AddAppContextMenu = false;
         public double BoundsX = double.NaN, BoundsY = double.NaN, BoundsWidth = 640, BoundsHeight = 420;
+        // 呼出位置记忆 v2（2026-11-09 跟随鼠标所在屏）：相对「其所在屏工作区原点」的偏移（DIP）。
+        // NaN = 旧配置尚未迁移，呼出时按旧绝对坐标口径定位一次，首次 SavePosition 后即写入新字段。
+        public double SummonOffsetX = double.NaN, SummonOffsetY = double.NaN;
 
         // ---- v2 新增键（v2. 前缀）----
         public bool LiteMode = false;
@@ -71,6 +74,8 @@ namespace PyTools.Core
             EncodeDirection = GetString("v2.encodeDirection", EncodeDirection);
             Theme = GetString("v2.theme", Theme);
             if (Theme != "dark" && Theme != "system") Theme = "light"; // 宽容：未知值回浅色
+            SummonOffsetX = GetNumber(_raw, "v2.summonOffsetX", SummonOffsetX);
+            SummonOffsetY = GetNumber(_raw, "v2.summonOffsetY", SummonOffsetY);
 
             var bounds = _raw.ContainsKey("windowBounds") ? _raw["windowBounds"] as Dictionary<string, object> : null;
             if (bounds != null)
@@ -97,12 +102,27 @@ namespace PyTools.Core
             catch (Exception ex) { Logger.Error("save bounds failed: " + ex.Message); }
         }
 
-        /// <summary>清除位置记忆（下次呼出走默认位：水平居中、垂直上 1/3）。设置窗口「恢复默认位置」调用。</summary>
+        /// <summary>清除位置记忆（下次呼出走默认位：目标屏内水平居中、垂直上 1/3）。设置窗口「恢复默认位置」调用。</summary>
         public void ResetBounds()
         {
             BoundsX = double.NaN; BoundsY = double.NaN;
-            try { _raw.Remove("windowBounds"); WriteBack(); }
+            SummonOffsetX = double.NaN; SummonOffsetY = double.NaN;
+            try
+            {
+                _raw.Remove("windowBounds");
+                _raw.Remove("v2.summonOffsetX");
+                _raw.Remove("v2.summonOffsetY");
+                WriteBack();
+            }
             catch (Exception ex) { Logger.Error("reset bounds failed: " + ex.Message); }
+        }
+
+        /// <summary>呼出位置偏移写入（相对所在屏工作区原点，DIP）。与 SaveBounds 同步落盘（2026-11-09）。</summary>
+        public void SaveSummonOffset(double offsetX, double offsetY)
+        {
+            SummonOffsetX = offsetX; SummonOffsetY = offsetY;
+            _raw["v2.summonOffsetX"] = offsetX;
+            _raw["v2.summonOffsetY"] = offsetY;
         }
 
         public void SaveLiteMode(bool lite)
@@ -156,6 +176,12 @@ namespace PyTools.Core
             _raw["v2.encodeFormat"] = EncodeFormat;
             _raw["v2.encodeDirection"] = EncodeDirection;
             _raw["v2.theme"] = Theme;
+            // 偏移可能仍是 NaN（旧配置未迁移）：JavaScriptSerializer 不支持 NaN，有值才写键（键缺失 = MapFromRaw 读回 NaN）
+            if (!double.IsNaN(SummonOffsetX) && !double.IsNaN(SummonOffsetY))
+            {
+                _raw["v2.summonOffsetX"] = SummonOffsetX;
+                _raw["v2.summonOffsetY"] = SummonOffsetY;
+            }
             var dir = Path.GetDirectoryName(_path);
             if (!string.IsNullOrEmpty(dir)) System.IO.Directory.CreateDirectory(dir);
             File.WriteAllText(_path, _serializer.Serialize(_raw));

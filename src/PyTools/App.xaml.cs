@@ -804,17 +804,23 @@ namespace PyTools
             return new Rect(left, top, width, 420); // 高度是过渡估计值，退出动画完成后 SizeToContent 接管
         }
 
-        /// <summary>目标 rect：以窗口当前中心为锚伸缩，钳制在虚拟屏内（v1 是跳到工作区居中，v2 保持用户记忆位附近）。</summary>
+        /// <summary>目标 rect：以窗口当前中心为锚伸缩，钳制在「窗口当前所在屏」工作区内（2026-11-09 从虚拟桌面收窄到单屏，
+        /// 固定尺寸模式不再骑缝两屏；v1 是跳到工作区居中，v2 保持用户记忆位附近）。所在屏取不到时退回虚拟桌面口径。</summary>
         private Rect TargetRectFor(Size target)
         {
-            var left = SystemParameters.VirtualScreenLeft;
-            var top = SystemParameters.VirtualScreenTop;
-            var width = Math.Min(target.Width, SystemParameters.VirtualScreenWidth);
-            var height = Math.Min(target.Height, SystemParameters.VirtualScreenHeight);
+            var hwnd = _window != null ? new WindowInteropHelper(_window).Handle : IntPtr.Zero;
+            var work = ScreenLayout.WindowMonitorWorkArea(hwnd);
+            bool hasWork = !work.IsEmpty;
+            var left = hasWork ? work.Left : SystemParameters.VirtualScreenLeft;
+            var top = hasWork ? work.Top : SystemParameters.VirtualScreenTop;
+            var boundWidth = hasWork ? work.Width : SystemParameters.VirtualScreenWidth;
+            var boundHeight = hasWork ? work.Height : SystemParameters.VirtualScreenHeight;
+            var width = Math.Min(target.Width, boundWidth);
+            var height = Math.Min(target.Height, boundHeight);
             var cx = _window.Left + _window.ActualWidth / 2;
             var cy = _window.Top + _window.ActualHeight / 2;
-            var x = Math.Max(left, Math.Min(cx - width / 2, left + SystemParameters.VirtualScreenWidth - width));
-            var y = Math.Max(top, Math.Min(cy - height / 2, top + SystemParameters.VirtualScreenHeight - height));
+            var x = Math.Max(left, Math.Min(cx - width / 2, left + boundWidth - width));
+            var y = Math.Max(top, Math.Min(cy - height / 2, top + boundHeight - height));
             return new Rect(x, y, width, height);
         }
 
@@ -919,10 +925,10 @@ namespace PyTools
             // 工具尺寸模式下藏窗：不当场还原（760×560 瞬缩 640×420 的跳变会被看见）——
             // 保持原样淡出，Hide 之后再瞬间还原（CompleteHide）；落盘直接用还原点
             if (_toolSizeMode)
-                _config.SaveBounds(_toolRestoreBounds.Left, _toolRestoreBounds.Top, _toolRestoreBounds.Width, _toolRestoreBounds.Height);
+                SavePosition(_toolRestoreBounds.Left, _toolRestoreBounds.Top, _toolRestoreBounds.Width, _toolRestoreBounds.Height);
             else
-                // 位置记忆（沿用 v1 的 windowBounds 键）
-                _config.SaveBounds(_window.Left, _window.Top, _window.Width, _window.Height);
+                // 位置记忆（沿用 v1 的 windowBounds 键；2026-11-09 起同步写目标屏偏移）
+                SavePosition(_window.Left, _window.Top, _window.Width, _window.Height);
 
             var ms = GetTokenDouble("Motion.HideMs");
             if (ms > 0)
@@ -976,20 +982,51 @@ namespace PyTools
             catch (Exception ex) { Logger.Error("after-hide action failed: " + ex.Message); }
         }
 
+        /// <summary>
+        /// 呼出定位（2026-11-09 改造：跟随鼠标所在屏）。
+        /// 新配置：目标屏 = 鼠标所在屏，位置 = 该屏工作区原点 + 记忆偏移（v2.summonOffsetX/Y，DIP）；
+        /// 旧配置（偏移字段为 NaN，尚未迁移）：按旧绝对坐标口径定位一次，首次 SavePosition 即写入偏移字段，
+        /// 之后开始跟随。两种口径最终都钳进目标屏工作区（收窄到单屏，窗口不再骑缝虚拟桌面）。
+        /// </summary>
         private void EnsureOnScreen()
         {
-            var left = _config.BoundsX;
-            var top = _config.BoundsY;
-            var virtualLeft = SystemParameters.VirtualScreenLeft;
-            var virtualTop = SystemParameters.VirtualScreenTop;
-            var virtualRight = virtualLeft + SystemParameters.VirtualScreenWidth;
-            var virtualBottom = virtualTop + SystemParameters.VirtualScreenHeight;
-            if (double.IsNaN(left) || left < virtualLeft - 8 || left > virtualRight - 80)
-                left = (SystemParameters.WorkArea.Width - _window.Width) / 2 + virtualLeft;
-            if (double.IsNaN(top) || top < virtualTop - 8 || top > virtualBottom - 80)
-                top = SystemParameters.WorkArea.Height / 3 + virtualTop; // 高度动态化后默认位只按上三分之一锚定
-            _window.Left = left;
-            _window.Top = top;
+            var work = ScreenLayout.CursorMonitorWorkArea();
+            double left, top;
+            if (!work.IsEmpty && !double.IsNaN(_config.SummonOffsetX) && !double.IsNaN(_config.SummonOffsetY))
+            {
+                left = work.Left + _config.SummonOffsetX;
+                top = work.Top + _config.SummonOffsetY;
+            }
+            else
+            {
+                // 旧配置迁移路径：绝对坐标 + 虚拟桌面 clamp（原口径）
+                left = _config.BoundsX;
+                top = _config.BoundsY;
+                var virtualLeft = SystemParameters.VirtualScreenLeft;
+                var virtualTop = SystemParameters.VirtualScreenTop;
+                var virtualRight = virtualLeft + SystemParameters.VirtualScreenWidth;
+                var virtualBottom = virtualTop + SystemParameters.VirtualScreenHeight;
+                if (double.IsNaN(left) || left < virtualLeft - 8 || left > virtualRight - 80)
+                    left = (SystemParameters.WorkArea.Width - _window.Width) / 2 + virtualLeft;
+                if (double.IsNaN(top) || top < virtualTop - 8 || top > virtualBottom - 80)
+                    top = SystemParameters.WorkArea.Height / 3 + virtualTop; // 高度动态化后默认位只按上三分之一锚定
+            }
+            var clamped = ScreenLayout.ClampIntoWork(work, left, top, _window.Width, 80, 120);
+            _window.Left = clamped.Item1;
+            _window.Top = clamped.Item2;
+        }
+
+        /// <summary>
+        /// 位置记忆落盘（2026-11-09）：除旧 windowBounds 绝对坐标外，同步写「相对其所在屏工作区原点」的偏移。
+        /// 三处调用点（收起落盘 / 工具尺寸还原点 / 退出落盘）统一走这里。
+        /// </summary>
+        private void SavePosition(double left, double top, double width, double height)
+        {
+            var hwnd = _window != null ? new WindowInteropHelper(_window).Handle : IntPtr.Zero;
+            var work = ScreenLayout.WindowMonitorWorkArea(hwnd);
+            if (!work.IsEmpty && !double.IsNaN(left) && !double.IsNaN(top))
+                _config.SaveSummonOffset(left - work.Left, top - work.Top);
+            _config.SaveBounds(left, top, width, height);
         }
 
         // ---- 剪贴板历史（M3，C1-C4 + S9）----
@@ -1402,7 +1439,7 @@ namespace PyTools
                 if (_window != null && _window.IsVisible)
                 {
                     if (_toolSizeMode) SnapRestoreBounds(); // 工具尺寸模式：退出前还原，位置记忆不被污染
-                    _config.SaveBounds(_window.Left, _window.Top, _window.Width, _window.Height);
+                    SavePosition(_window.Left, _window.Top, _window.Width, _window.Height);
                 }
                 if (_tray != null) _tray.Dispose();
                 if (_single != null) _single.Dispose();

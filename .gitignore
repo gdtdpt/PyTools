@@ -3,6 +3,7 @@ bin/
 obj/
 .vs/
 *.user
+dist/
 
 # 系统与编辑器
 .DS_Store

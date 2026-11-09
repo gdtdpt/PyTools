@@ -81,6 +81,49 @@ namespace PyTools.Core
                 finally { try { File.Delete(path); } catch { } }
             }));
 
+            results.Add(Test("多屏定位：ClampIntoWork 钳制口径", () =>
+            {
+                var work = new Rect(0, 0, 1920, 1040);
+                var inBounds = ScreenLayout.ClampIntoWork(work, 100, 200, 640, 80, 120);
+                if (inBounds.Item1 != 100 || inBounds.Item2 != 200) return "屏内位置被误钳";
+                var overRight = ScreenLayout.ClampIntoWork(work, 1900, 200, 640, 80, 120);
+                if (overRight.Item1 != 1840) return "右溢出未钳: " + overRight.Item1; // 1920-80
+                var overBottom = ScreenLayout.ClampIntoWork(work, 100, 1200, 640, 80, 120);
+                if (overBottom.Item2 != 920) return "下溢出未钳: " + overBottom.Item2; // 1040-120
+                var neg = ScreenLayout.ClampIntoWork(work, -300, -500, 640, 80, 120);
+                if (neg.Item1 != -300 || neg.Item2 != -500) return "上/左贴边被误钳"; // 只钳右/下
+                var empty = ScreenLayout.ClampIntoWork(Rect.Empty, 50, 60, 640, 80, 120);
+                if (empty.Item1 != 50 || empty.Item2 != 60) return "空工作区应原样返回";
+                return null;
+            }));
+
+            results.Add(Test("多屏定位：呼出偏移字段读写与 NaN 不落盘", () =>
+            {
+                var path = Path.Combine(Path.GetTempPath(), "pytools-selftest-" + Guid.NewGuid().ToString("N") + ".json");
+                try
+                {
+                    // 旧配置（无偏移键）→ 读回 NaN
+                    File.WriteAllText(path, "{\"v2.pageStep\":5}");
+                    var cfg = AppConfig.Load(path);
+                    if (!double.IsNaN(cfg.SummonOffsetX) || !double.IsNaN(cfg.SummonOffsetY)) return "旧配置应读回 NaN";
+                    cfg.SaveBounds(1, 2, 640, 420); // NaN 期间落盘不得把 NaN 写进 JSON
+                    var mid = File.ReadAllText(path);
+                    if (mid.Contains("summonOffset")) return "NaN 偏移被序列化";
+                    // 保存偏移 → 重载读回
+                    cfg.SaveSummonOffset(120.5, 240.25);
+                    var reloaded = AppConfig.Load(path);
+                    if (reloaded.SummonOffsetX != 120.5 || reloaded.SummonOffsetY != 240.25)
+                        return "偏移回读不符: " + reloaded.SummonOffsetX + "," + reloaded.SummonOffsetY;
+                    if (!File.ReadAllText(path).Contains("v2.summonOffsetX")) return "偏移键未落盘";
+                    // 恢复默认位置清除
+                    reloaded.ResetBounds();
+                    var cleared = AppConfig.Load(path);
+                    if (!double.IsNaN(cleared.SummonOffsetX) || !double.IsNaN(cleared.SummonOffsetY)) return "ResetBounds 未清偏移";
+                    return null;
+                }
+                finally { try { File.Delete(path); } catch { } }
+            }));
+
             results.Add(Test("前台恢复：零句柄 no-op", () =>
             {
                 var report = Foreground.Restore(IntPtr.Zero);

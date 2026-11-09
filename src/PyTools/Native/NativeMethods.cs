@@ -66,5 +66,42 @@ namespace PyTools.Native
             try { AttachConsole(AttachParentProcess); }
             catch { /* 自测输出尽力而为 */ }
         }
+
+        // ---- 多屏定位（2026-11-09 呼出窗跟随鼠标）----
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct NativePoint { public int X; public int Y; }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct NativeRect { public int Left; public int Top; public int Right; public int Bottom; }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct MonitorInfo
+        {
+            public int CbSize;
+            public NativeRect RcMonitor;
+            public NativeRect RcWork;
+            public uint DwFlags;
+        }
+
+        public const uint MonitorDefaultToNearest = 2;
+        public const int SmCxVirtualScreen = 76;
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool GetCursorPos(out NativePoint lpPoint);
+
+        [DllImport("user32.dll")]
+        public static extern IntPtr MonitorFromPoint(NativePoint pt, uint dwFlags);
+
+        [DllImport("user32.dll")]
+        public static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool GetMonitorInfo(IntPtr hMonitor, ref MonitorInfo lpmi);
+
+        [DllImport("user32.dll")]
+        public static extern int GetSystemMetrics(int nIndex);
     }
 }

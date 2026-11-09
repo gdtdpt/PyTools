@@ -136,6 +136,7 @@
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="Core\Logger.cs" />
+    <Compile Include="Core\ScreenLayout.cs" />
     <Compile Include="Core\AppConfig.cs" />
     <Compile Include="Core\SingleInstance.cs" />
     <Compile Include="Core\SelfTest.cs" />
