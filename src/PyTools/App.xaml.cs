@@ -753,9 +753,10 @@ namespace PyTools
             _window.SizeToContent = SizeToContent.Manual;
             if (!windowVisible)
             {
-                // 冷启动：无动画直接放大；位置交给 EnsureOnScreen（这里只钳制尺寸到虚拟屏）
-                _window.Width = Math.Min(target.Width, SystemParameters.VirtualScreenWidth);
-                _window.Height = Math.Min(target.Height, SystemParameters.VirtualScreenHeight);
+                // 冷启动：无动画直接放大；位置交给 EnsureOnScreen（这里只钳制尺寸到鼠标所在屏，混合 DPI 下不能用虚拟桌面值）
+                var dipWork = ScreenLayout.WorkAreaDip(ScreenLayout.CursorScreen());
+                _window.Width = Math.Min(target.Width, dipWork.IsEmpty ? SystemParameters.VirtualScreenWidth : dipWork.Width);
+                _window.Height = Math.Min(target.Height, dipWork.IsEmpty ? SystemParameters.VirtualScreenHeight : dipWork.Height);
                 _window.MinHeight = _window.Height; // 无动画路径没有完成回调，直接钉住（防内容挂载竞态把高度压回自然高）
                 return;
             }
@@ -793,14 +794,25 @@ namespace PyTools
 
             width = _config.BoundsWidth;
             if (double.IsNaN(width) || width <= 0) width = 640;
-            var left = _config.BoundsX;
-            var virtualLeft = SystemParameters.VirtualScreenLeft;
-            var virtualTop = SystemParameters.VirtualScreenTop;
-            if (double.IsNaN(left) || left < virtualLeft - 8 || left > virtualLeft + SystemParameters.VirtualScreenWidth - 80)
-                left = (SystemParameters.WorkArea.Width - width) / 2 + virtualLeft;
-            var top = _config.BoundsY;
-            if (double.IsNaN(top) || top < virtualTop - 8 || top > virtualTop + SystemParameters.VirtualScreenHeight - 80)
-                top = SystemParameters.WorkArea.Height / 3 + virtualTop;
+            var dipWork = ScreenLayout.WorkAreaDip(ScreenLayout.CursorScreen());
+            double left, top;
+            if (!dipWork.IsEmpty && !double.IsNaN(_config.SummonOffsetX) && !double.IsNaN(_config.SummonOffsetY))
+            {
+                left = dipWork.Left + _config.SummonOffsetX;
+                top = dipWork.Top + _config.SummonOffsetY;
+            }
+            else if (!dipWork.IsEmpty)
+            {
+                left = dipWork.Left + (dipWork.Width - width) / 2.0;
+                top = dipWork.Top + dipWork.Height / 3.0;
+            }
+            else
+            {
+                left = _config.BoundsX;
+                top = _config.BoundsY;
+                if (double.IsNaN(left)) left = (SystemParameters.WorkArea.Width - width) / 2 + SystemParameters.VirtualScreenLeft;
+                if (double.IsNaN(top)) top = SystemParameters.WorkArea.Height / 3 + SystemParameters.VirtualScreenTop;
+            }
             return new Rect(left, top, width, 420); // 高度是过渡估计值，退出动画完成后 SizeToContent 接管
         }
 
@@ -809,12 +821,12 @@ namespace PyTools
         private Rect TargetRectFor(Size target)
         {
             var hwnd = _window != null ? new WindowInteropHelper(_window).Handle : IntPtr.Zero;
-            var work = ScreenLayout.WindowMonitorWorkArea(hwnd);
-            bool hasWork = !work.IsEmpty;
-            var left = hasWork ? work.Left : SystemParameters.VirtualScreenLeft;
-            var top = hasWork ? work.Top : SystemParameters.VirtualScreenTop;
-            var boundWidth = hasWork ? work.Width : SystemParameters.VirtualScreenWidth;
-            var boundHeight = hasWork ? work.Height : SystemParameters.VirtualScreenHeight;
+            var dipWork = ScreenLayout.WorkAreaDip(ScreenLayout.ScreenForWindow(hwnd));
+            bool hasWork = !dipWork.IsEmpty;
+            var left = hasWork ? dipWork.Left : SystemParameters.VirtualScreenLeft;
+            var top = hasWork ? dipWork.Top : SystemParameters.VirtualScreenTop;
+            var boundWidth = hasWork ? dipWork.Width : SystemParameters.VirtualScreenWidth;
+            var boundHeight = hasWork ? dipWork.Height : SystemParameters.VirtualScreenHeight;
             var width = Math.Min(target.Width, boundWidth);
             var height = Math.Min(target.Height, boundHeight);
             var cx = _window.Left + _window.ActualWidth / 2;
@@ -925,10 +937,10 @@ namespace PyTools
             // 工具尺寸模式下藏窗：不当场还原（760×560 瞬缩 640×420 的跳变会被看见）——
             // 保持原样淡出，Hide 之后再瞬间还原（CompleteHide）；落盘直接用还原点
             if (_toolSizeMode)
-                SavePosition(_toolRestoreBounds.Left, _toolRestoreBounds.Top, _toolRestoreBounds.Width, _toolRestoreBounds.Height);
+                SaveRestorePosition();
             else
                 // 位置记忆（沿用 v1 的 windowBounds 键；2026-11-09 起同步写目标屏偏移）
-                SavePosition(_window.Left, _window.Top, _window.Width, _window.Height);
+                SavePosition();
 
             var ms = GetTokenDouble("Motion.HideMs");
             if (ms > 0)
@@ -988,45 +1000,130 @@ namespace PyTools
         /// 旧配置（偏移字段为 NaN，尚未迁移）：按旧绝对坐标口径定位一次，首次 SavePosition 即写入偏移字段，
         /// 之后开始跟随。两种口径最终都钳进目标屏工作区（收窄到单屏，窗口不再骑缝虚拟桌面）。
         /// </summary>
+        /// <summary>
+        /// 呼出落位（2026-11-10 全程物理像素）：鼠标所在屏工作区 + 记忆偏移（DIP × 目标屏 Scale）→ SetWindowPos 直接落位。
+        /// 不能用 WPF 的 Left/Top：它按「窗口当前所在屏」的 DPI 折算，跨屏 DPI 切换时一定偏
+        /// （混合 DPI 下表现为高分辨率屏跑左下角、低分辨率屏整窗看不见）。
+        /// </summary>
         private void EnsureOnScreen()
         {
-            var work = ScreenLayout.CursorMonitorWorkArea();
+            var hwnd = new WindowInteropHelper(_window).EnsureHandle();
+            var screen = ScreenLayout.CursorScreen();
+            if (hwnd == IntPtr.Zero || !screen.Available) { EnsureOnScreenLegacy(); return; }
+
+            var scale = screen.Scale > 0 ? screen.Scale : 1.0;
+            var widthDip = _window.Width;
+            if (double.IsNaN(widthDip) || widthDip <= 0) widthDip = 640;
+            var widthPx = (int)Math.Round(widthDip * scale);
+
+            var heightPx = 0; // 高度交给 SizeToContent：0 = 不改尺寸
+            Rect current;
+            if (ScreenLayout.TryGetWindowRect(hwnd, out current) && current.Height > 0)
+                heightPx = (int)Math.Round(current.Height);
+
             double left, top;
-            if (!work.IsEmpty && !double.IsNaN(_config.SummonOffsetX) && !double.IsNaN(_config.SummonOffsetY))
+            if (!double.IsNaN(_config.SummonOffsetX) && !double.IsNaN(_config.SummonOffsetY))
             {
-                left = work.Left + _config.SummonOffsetX;
-                top = work.Top + _config.SummonOffsetY;
+                left = screen.Work.Left + _config.SummonOffsetX * scale;
+                top = screen.Work.Top + _config.SummonOffsetY * scale;
+            }
+            else if (!double.IsNaN(_config.BoundsX) && !double.IsNaN(_config.BoundsY)
+                     && screen.Work.Contains(new Point(_config.BoundsX, _config.BoundsY)))
+            {
+                // 旧配置的绝对坐标（单屏 100% 时代 = 物理像素）：落在本屏工作区内则按物理像素沿用
+                left = _config.BoundsX;
+                top = _config.BoundsY;
             }
             else
             {
-                // 旧配置迁移路径：绝对坐标 + 虚拟桌面 clamp（原口径）
-                left = _config.BoundsX;
-                top = _config.BoundsY;
-                var virtualLeft = SystemParameters.VirtualScreenLeft;
-                var virtualTop = SystemParameters.VirtualScreenTop;
-                var virtualRight = virtualLeft + SystemParameters.VirtualScreenWidth;
-                var virtualBottom = virtualTop + SystemParameters.VirtualScreenHeight;
-                if (double.IsNaN(left) || left < virtualLeft - 8 || left > virtualRight - 80)
-                    left = (SystemParameters.WorkArea.Width - _window.Width) / 2 + virtualLeft;
-                if (double.IsNaN(top) || top < virtualTop - 8 || top > virtualBottom - 80)
-                    top = SystemParameters.WorkArea.Height / 3 + virtualTop; // 高度动态化后默认位只按上三分之一锚定
+                left = screen.Work.Left + (screen.Work.Width - widthPx) / 2.0;   // 水平居中
+                top = screen.Work.Top + screen.Work.Height / 3.0;                // 垂直上三分之一
             }
-            var clamped = ScreenLayout.ClampIntoWork(work, left, top, _window.Width, 80, 120);
-            _window.Left = clamped.Item1;
-            _window.Top = clamped.Item2;
+
+            var clamped = ScreenLayout.ClampIntoWork(screen.Work, left, top, widthPx, 80 * scale, 120 * scale);
+            PlacePhysical(hwnd, clamped.Item1, clamped.Item2, widthPx, heightPx);
+        }
+
+        /// <summary>取不到显示器信息时的兜底：旧虚拟桌面 DIP 口径（单屏场景等价）。</summary>
+        private void EnsureOnScreenLegacy()
+        {
+            var left = _config.BoundsX;
+            var top = _config.BoundsY;
+            var virtualLeft = SystemParameters.VirtualScreenLeft;
+            var virtualTop = SystemParameters.VirtualScreenTop;
+            var virtualRight = virtualLeft + SystemParameters.VirtualScreenWidth;
+            var virtualBottom = virtualTop + SystemParameters.VirtualScreenHeight;
+            if (double.IsNaN(left) || left < virtualLeft - 8 || left > virtualRight - 80)
+                left = (SystemParameters.WorkArea.Width - _window.Width) / 2 + virtualLeft;
+            if (double.IsNaN(top) || top < virtualTop - 8 || top > virtualBottom - 80)
+                top = SystemParameters.WorkArea.Height / 3 + virtualTop;
+            _window.Left = left;
+            _window.Top = top;
+        }
+
+        /// <summary>物理像素落位。WPF 收到 DPI 变更后可能按系统建议矩形重排，所以延后两拍把左上角再钉一次（尺寸不动）。</summary>
+        private void PlacePhysical(IntPtr hwnd, double left, double top, int widthPx, int heightPx)
+        {
+            var x = (int)Math.Round(left);
+            var y = (int)Math.Round(top);
+            NativeMethods.SetWindowPos(hwnd, IntPtr.Zero, x, y, widthPx, heightPx,
+                NativeMethods.SwpNoZOrder | NativeMethods.SwpNoActivate);
+            SettlePlacement(hwnd, x, y, 0);
+            SettlePlacement(hwnd, x, y, 200); // DPI 变更回调异步：第二拍兜住
+        }
+
+        private void SettlePlacement(IntPtr hwnd, int x, int y, int delayMs)
+        {
+            if (delayMs <= 0)
+            {
+                Dispatcher.BeginInvoke(new Action(delegate { PinTopLeft(hwnd, x, y); }),
+                    System.Windows.Threading.DispatcherPriority.Loaded);
+                return;
+            }
+            var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(delayMs) };
+            timer.Tick += delegate { timer.Stop(); PinTopLeft(hwnd, x, y); };
+            timer.Start();
+        }
+
+        private void PinTopLeft(IntPtr hwnd, int x, int y)
+        {
+            if (hwnd == IntPtr.Zero || _window == null || !_window.IsVisible || _toolSizeMode) return;
+            NativeMethods.SetWindowPos(hwnd, IntPtr.Zero, x, y, 0, 0,
+                NativeMethods.SwpNoZOrder | NativeMethods.SwpNoActivate | NativeMethods.SwpNoSize);
         }
 
         /// <summary>
-        /// 位置记忆落盘（2026-11-09）：除旧 windowBounds 绝对坐标外，同步写「相对其所在屏工作区原点」的偏移。
-        /// 三处调用点（收起落盘 / 工具尺寸还原点 / 退出落盘）统一走这里。
+        /// 位置记忆落盘：偏移按「相对所在屏工作区原点」的 DIP 记（还原时乘目标屏 Scale），
+        /// 同时沿用 v1 的 windowBounds 绝对坐标键。读取窗口物理矩形换算，不用 WPF 的 Left/Top。
         /// </summary>
-        private void SavePosition(double left, double top, double width, double height)
+        private void SavePosition()
         {
             var hwnd = _window != null ? new WindowInteropHelper(_window).Handle : IntPtr.Zero;
-            var work = ScreenLayout.WindowMonitorWorkArea(hwnd);
-            if (!work.IsEmpty && !double.IsNaN(left) && !double.IsNaN(top))
-                _config.SaveSummonOffset(left - work.Left, top - work.Top);
-            _config.SaveBounds(left, top, width, height);
+            var screen = ScreenLayout.ScreenForWindow(hwnd);
+            Rect physical;
+            if (!ScreenLayout.TryGetWindowRect(hwnd, out physical) || physical.Width <= 0)
+            {
+                _config.SaveBounds(_window.Left, _window.Top, _window.ActualWidth, _window.ActualHeight);
+                return;
+            }
+            var scale = screen.Available && screen.Scale > 0 ? screen.Scale : 1.0;
+            SavePositionFromDip(new Rect(physical.Left / scale, physical.Top / scale,
+                physical.Width / scale, physical.Height / scale), screen);
+        }
+
+        /// <summary>工具尺寸模式下的落盘：窗口当前是放大态，必须用还原点（DIP）。</summary>
+        private void SaveRestorePosition()
+        {
+            var hwnd = _window != null ? new WindowInteropHelper(_window).Handle : IntPtr.Zero;
+            SavePositionFromDip(_toolRestoreBounds, ScreenLayout.ScreenForWindow(hwnd));
+        }
+
+        private void SavePositionFromDip(Rect dipBounds, ScreenInfo screen)
+        {
+            var dipWork = ScreenLayout.WorkAreaDip(screen);
+            if (!dipWork.IsEmpty)
+                _config.SaveSummonOffset(dipBounds.Left - dipWork.Left, dipBounds.Top - dipWork.Top);
+            _config.SaveBounds(dipBounds.Left, dipBounds.Top, dipBounds.Width, dipBounds.Height);
         }
 
         // ---- 剪贴板历史（M3，C1-C4 + S9）----
@@ -1439,7 +1536,7 @@ namespace PyTools
                 if (_window != null && _window.IsVisible)
                 {
                     if (_toolSizeMode) SnapRestoreBounds(); // 工具尺寸模式：退出前还原，位置记忆不被污染
-                    SavePosition(_window.Left, _window.Top, _window.Width, _window.Height);
+                    SavePosition();
                 }
                 if (_tray != null) _tray.Dispose();
                 if (_single != null) _single.Dispose();

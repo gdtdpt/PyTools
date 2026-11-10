@@ -97,6 +97,19 @@ namespace PyTools.Core
                 return null;
             }));
 
+            results.Add(Test("多屏定位：逐屏 DPI 换算（工作区 DIP = 物理 ÷ 该屏 Scale）", () =>
+            {
+                var screen = new ScreenInfo { Available = true, Work = new Rect(3840, 0, 2560, 1400), Dpi = 144, Scale = 1.5 };
+                var dip = ScreenLayout.WorkAreaDip(screen);
+                if (Math.Abs(dip.Left - 2560) > 0.001) return "DIP 原点错: " + dip.Left;
+                if (Math.Abs(dip.Width - 2560 / 1.5) > 0.001) return "DIP 宽度错: " + dip.Width;
+                if (!ScreenLayout.WorkAreaDip(new ScreenInfo()).IsEmpty) return "不可用显示器应返回空";
+                // 实机自检：GetDpiForMonitor 返回 0 会让 Scale 变成 0 → 后续除零；区间失真也要报
+                var real = ScreenLayout.CursorScreen();
+                if (real.Available && (real.Scale < 0.5 || real.Scale > 4.0)) return "实机 Scale 异常: " + real.Scale;
+                return null;
+            }));
+
             results.Add(Test("多屏定位：呼出偏移字段读写与 NaN 不落盘", () =>
             {
                 var path = Path.Combine(Path.GetTempPath(), "pytools-selftest-" + Guid.NewGuid().ToString("N") + ".json");
