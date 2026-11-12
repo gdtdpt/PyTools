@@ -128,10 +128,29 @@ namespace PyTools.Core
                     if (reloaded.SummonOffsetX != 120.5 || reloaded.SummonOffsetY != 240.25)
                         return "偏移回读不符: " + reloaded.SummonOffsetX + "," + reloaded.SummonOffsetY;
                     if (!File.ReadAllText(path).Contains("v2.summonOffsetX")) return "偏移键未落盘";
+                    if (!File.ReadAllText(path).Contains("\"v2.summonOffsetVer\":2")) return "偏移版本键未落盘";
                     // 恢复默认位置清除
                     reloaded.ResetBounds();
                     var cleared = AppConfig.Load(path);
                     if (!double.IsNaN(cleared.SummonOffsetX) || !double.IsNaN(cleared.SummonOffsetY)) return "ResetBounds 未清偏移";
+                    return null;
+                }
+                finally { try { File.Delete(path); } catch { } }
+            }));
+
+            results.Add(Test("多屏定位：旧语义偏移（无版本键）作废", () =>
+            {
+                var path = Path.Combine(Path.GetTempPath(), "pytools-selftest-" + Guid.NewGuid().ToString("N") + ".json");
+                try
+                {
+                    // rc5 时代落盘的偏移没有版本键 → 必须作废（NaN），呼出走默认位
+                    File.WriteAllText(path, "{\"v2.summonOffsetX\":364,\"v2.summonOffsetY\":300,\"windowBounds\":{\"x\":364,\"y\":300,\"width\":640,\"height\":420}}");
+                    var cfg = AppConfig.Load(path);
+                    if (!double.IsNaN(cfg.SummonOffsetX) || !double.IsNaN(cfg.SummonOffsetY)) return "无版本键的旧偏移未被作废";
+                    // 版本不符同理
+                    File.WriteAllText(path, "{\"v2.summonOffsetVer\":1,\"v2.summonOffsetX\":10,\"v2.summonOffsetY\":10}");
+                    var cfg2 = AppConfig.Load(path);
+                    if (!double.IsNaN(cfg2.SummonOffsetX) || !double.IsNaN(cfg2.SummonOffsetY)) return "版本不符的旧偏移未被作废";
                     return null;
                 }
                 finally { try { File.Delete(path); } catch { } }

@@ -2,12 +2,14 @@
 
 > **仓库剥离说明（2026-11-06）**：本仓库由旧仓库 `pytools` 的 `v2/` 子目录经 `git subtree split` 剥离而来，26 个提交历史连续（作者已统一重写为 gdtdpt）。文中提及的 `40afd24` 等提交号在剥离重写后已变化（旧号仅作历史索引）；提及 `v2/...` 的路径一律对应本仓库根。
 
-状态：**2.0.0-rc6 预发布包构建，待双屏真机验证（2026-11-10）**，rc1 之后新增待验收提交：var 截断气泡（`f65b396`）、多行编辑区滚动条贴底 + encode/regex 自动换行（`d4a03a3`）、暗色+简洁模式整窗发白修复（`f81d005`）、呼出窗跟随鼠标所在屏（`addf62a`，混合 DPI 返工见下，双屏验收清单见下）、带参 lnk 启动报 193 修复（2026-11-09 真机踩到：Chrome 开始菜单快捷方式自带 `--source-shortcut-location=start-menu`，CreateProcess 直接对 .lnk 报 ERROR_BAD_EXE_FORMAT；修复为带参分支 spawn 解析后的 TargetPath + 存在性检查按真实目标判定 + SaveSummonOffset 补落盘，selftest 101 项全过，Chrome 条目探针实测启动成功）；tools 工具列表 + 内置工具图标已验收（剥离前提交 `40afd24`，selftest 96 项全过；含验收反馈修复：列表行图标-文字间距）；明暗主题已验收提交（`fab53a0`，2026-11-05，selftest 94 项全过）；code-naming 已验收提交（`3f5483e`，2026-11-05，M4 AI 批第四消费者收官，selftest 93 项全过）；ai-translate 已验收提交（`f08fb91`，2026-11-05，M4 AI 批第三个消费者，selftest 90 项全过）；剪贴板文件条目打磨 + 写回重试 + 滚动复位已验收提交（`e776f9f`，selftest 88）；ai-ocr 已验收提交（`46cf1ff`，M4 AI 批第二个消费者，selftest 87）；regex AI 生成 POC 已验收提交（`dfc3b9d`）；diff F3 备用键 N/P 已验收（`31794b4`）；diff 行号列水平固定已验收（`6f4cb64`）；text-diff 已验收提交（2026-11-04）；regex-tool / S10 自启清理已提交（2026-11-04）；此前 UI 控件规范化（`155e9a9`）/ cron（`e1e1ea7`）/ encoding-converter（`6af788d`）/ format 间距（`4ca3c72`）/ 剪贴板 alpha（`05daf1d`）已验收提交；dev-values 用户暂缓，env-switcher 归 M5；另有待排期需求「diff 历史记录」（见下）
+状态：**2.0.0-rc7 预发布包构建，待双屏真机验证（2026-11-12）**，rc1 之后新增待验收提交：var 截断气泡（`f65b396`）、多行编辑区滚动条贴底 + encode/regex 自动换行（`d4a03a3`）、暗色+简洁模式整窗发白修复（`f81d005`）、呼出窗跟随鼠标所在屏（`addf62a`，混合 DPI 物理像素返工 + 旧偏移作废见下，双屏验收清单见下）、带参 lnk 启动报 193 修复（2026-11-09 真机踩到：Chrome 开始菜单快捷方式自带 `--source-shortcut-location=start-menu`，CreateProcess 直接对 .lnk 报 ERROR_BAD_EXE_FORMAT；修复为带参分支 spawn 解析后的 TargetPath + 存在性检查按真实目标判定 + SaveSummonOffset 补落盘，selftest 101 项全过，Chrome 条目探针实测启动成功）；tools 工具列表 + 内置工具图标已验收（剥离前提交 `40afd24`，selftest 96 项全过；含验收反馈修复：列表行图标-文字间距）；明暗主题已验收提交（`fab53a0`，2026-11-05，selftest 94 项全过）；code-naming 已验收提交（`3f5483e`，2026-11-05，M4 AI 批第四消费者收官，selftest 93 项全过）；ai-translate 已验收提交（`f08fb91`，2026-11-05，M4 AI 批第三个消费者，selftest 90 项全过）；剪贴板文件条目打磨 + 写回重试 + 滚动复位已验收提交（`e776f9f`，selftest 88）；ai-ocr 已验收提交（`46cf1ff`，M4 AI 批第二个消费者，selftest 87）；regex AI 生成 POC 已验收提交（`dfc3b9d`）；diff F3 备用键 N/P 已验收（`31794b4`）；diff 行号列水平固定已验收（`6f4cb64`）；text-diff 已验收提交（2026-11-04）；regex-tool / S10 自启清理已提交（2026-11-04）；此前 UI 控件规范化（`155e9a9`）/ cron（`e1e1ea7`）/ encoding-converter（`6af788d`）/ format 间距（`4ca3c72`）/ 剪贴板 alpha（`05daf1d`）已验收提交；dev-values 用户暂缓，env-switcher 归 M5；另有待排期需求「diff 历史记录」（见下）
 更新时间：2026-11-09
 
-## 呼出窗跟随鼠标所在屏（2026-11-09 定案，2026-11-10 改为全程物理像素，待双屏真机验收）
+## 呼出窗跟随鼠标所在屏（2026-11-09 定案，2026-11-10 全程物理像素，2026-11-12 旧偏移作废，待双屏真机验收）
 
 拍板：选屏依据 = **鼠标位置**（用户确认）；不加设置项。
+
+**旧偏移作废（2026-11-12 真机反馈：两屏都能显示但都压在左下角）**：rc5 时代以错误坐标语义落盘的 `v2.summonOffsetX/Y`（且部分值来自飞屏状态的 clamp 残迹）被 rc6 直接信任——换算后超出屏高 → `ClampIntoWork` 钳到「屏底保留 120px 可见」+ 左缘，正是截图的左下角贴边形态。修法：新增 **`v2.summonOffsetVer`（当前 = 2）** 标记偏移的坐标语义版本；`Load` 时版本缺失/不符一律作废（NaN），呼出走默认位（目标屏水平居中、垂直上 1/3），首次收起重新落盘并写入版本键；`SaveSummonOffset`/`WriteBack`/`ResetBounds` 三处同步维护版本键。selftest 103 项全过（新增：无版本键偏移作废、版本不符作废、保存后版本键落盘）。探针复现用户场景（塞入 rc5 旧偏移）：窗口落在工作区中部（rel x=0.37/y=0.23）而非左下角，Esc 后按新语义重新落盘 ver=2。
 
 **混合 DPI 返工原因（2026-11-10 真机反馈：高分辨率屏呼出偏左下、低分辨率屏看不到窗口）**：首版把「物理像素工作区」用**单一全局系数**折算成 DIP（`VirtualScreenWidth / SM_CXVIRTUALSCREEN`，本质是主屏/系统 DPI），再交给 WPF 的 `Left/Top`。混合 DPI 下每块屏的系数不同——副屏工作区原点被按主屏 DPI 折算后必然错位（缩放比 200% 的屏偏将近一屏宽度，100% 的屏整窗飞出）。⇒ 定位链一律改为**物理像素**。
 

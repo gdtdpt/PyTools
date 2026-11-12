@@ -25,6 +25,9 @@ namespace PyTools.Core
         // NaN = 旧配置尚未迁移，呼出时按旧绝对坐标口径定位一次，首次 SavePosition 后即写入新字段。
         public double SummonOffsetX = double.NaN, SummonOffsetY = double.NaN;
 
+        /// <summary>偏移字段的坐标语义版本（2 = 相对所在屏工作区原点的 DIP）。版本不符的旧值一律作废。</summary>
+        public const int SummonOffsetVersion = 2;
+
         // ---- v2 新增键（v2. 前缀）----
         public bool LiteMode = false;
         public bool PinyinSearch = true;   // 拼音首字母搜索（M2a，L7）
@@ -74,8 +77,18 @@ namespace PyTools.Core
             EncodeDirection = GetString("v2.encodeDirection", EncodeDirection);
             Theme = GetString("v2.theme", Theme);
             if (Theme != "dark" && Theme != "system") Theme = "light"; // 宽容：未知值回浅色
-            SummonOffsetX = GetNumber(_raw, "v2.summonOffsetX", SummonOffsetX);
-            SummonOffsetY = GetNumber(_raw, "v2.summonOffsetY", SummonOffsetY);
+            // 偏移只在语义版本匹配时信任（2026-11-12）：rc5 时代以错误坐标语义落盘的旧偏移
+            // 必须作废——无版本标记/版本不符一律按未迁移处理，下次呼出走默认位后重新落盘
+            if (GetNumber(_raw, "v2.summonOffsetVer", 0) == SummonOffsetVersion)
+            {
+                SummonOffsetX = GetNumber(_raw, "v2.summonOffsetX", SummonOffsetX);
+                SummonOffsetY = GetNumber(_raw, "v2.summonOffsetY", SummonOffsetY);
+            }
+            else
+            {
+                SummonOffsetX = double.NaN;
+                SummonOffsetY = double.NaN;
+            }
 
             var bounds = _raw.ContainsKey("windowBounds") ? _raw["windowBounds"] as Dictionary<string, object> : null;
             if (bounds != null)
@@ -112,6 +125,7 @@ namespace PyTools.Core
                 _raw.Remove("windowBounds");
                 _raw.Remove("v2.summonOffsetX");
                 _raw.Remove("v2.summonOffsetY");
+                _raw.Remove("v2.summonOffsetVer");
                 WriteBack();
             }
             catch (Exception ex) { Logger.Error("reset bounds failed: " + ex.Message); }
@@ -128,11 +142,13 @@ namespace PyTools.Core
                 {
                     _raw.Remove("v2.summonOffsetX");
                     _raw.Remove("v2.summonOffsetY");
+                    _raw.Remove("v2.summonOffsetVer");
                 }
                 else
                 {
                     _raw["v2.summonOffsetX"] = offsetX;
                     _raw["v2.summonOffsetY"] = offsetY;
+                    _raw["v2.summonOffsetVer"] = SummonOffsetVersion;
                 }
                 WriteBack();
             }
@@ -190,11 +206,18 @@ namespace PyTools.Core
             _raw["v2.encodeFormat"] = EncodeFormat;
             _raw["v2.encodeDirection"] = EncodeDirection;
             _raw["v2.theme"] = Theme;
-            // 偏移可能仍是 NaN（旧配置未迁移）：JavaScriptSerializer 不支持 NaN，有值才写键（键缺失 = MapFromRaw 读回 NaN）
+            // 偏移可能仍是 NaN（未迁移/被版本检查作废）：JavaScriptSerializer 不支持 NaN，有值才写键（键缺失 = MapFromRaw 读回 NaN）
             if (!double.IsNaN(SummonOffsetX) && !double.IsNaN(SummonOffsetY))
             {
                 _raw["v2.summonOffsetX"] = SummonOffsetX;
                 _raw["v2.summonOffsetY"] = SummonOffsetY;
+                _raw["v2.summonOffsetVer"] = SummonOffsetVersion;
+            }
+            else
+            {
+                _raw.Remove("v2.summonOffsetX");
+                _raw.Remove("v2.summonOffsetY");
+                _raw.Remove("v2.summonOffsetVer");
             }
             var dir = Path.GetDirectoryName(_path);
             if (!string.IsNullOrEmpty(dir)) System.IO.Directory.CreateDirectory(dir);
