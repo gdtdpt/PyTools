@@ -1027,15 +1027,10 @@ namespace PyTools
                 left = screen.Work.Left + _config.SummonOffsetX * scale;
                 top = screen.Work.Top + _config.SummonOffsetY * scale;
             }
-            else if (!double.IsNaN(_config.BoundsX) && !double.IsNaN(_config.BoundsY)
-                     && screen.Work.Contains(new Point(_config.BoundsX, _config.BoundsY)))
-            {
-                // 旧配置的绝对坐标（单屏 100% 时代 = 物理像素）：落在本屏工作区内则按物理像素沿用
-                left = _config.BoundsX;
-                top = _config.BoundsY;
-            }
             else
             {
+                // 无有效偏移（首次运行 / 旧语义作废）→ 默认位。历史 windowBounds 是 DIP 口径，
+                // 不能当物理像素沿用（scale≠1 时偏到左上），位置记忆从首次收起重新建立。
                 left = screen.Work.Left + (screen.Work.Width - widthPx) / 2.0;   // 水平居中
                 top = screen.Work.Top + screen.Work.Height / 3.0;                // 垂直上三分之一
             }
