@@ -10,8 +10,24 @@ namespace PyTools.Core
     {
         public bool Available;
         public Rect Work;              // 物理像素，与 Win32 坐标系一致
+        public Rect Bounds;            // 整屏物理矩形（含任务栏区域），仅用于 Key 的身份判定
+        public string Device = "";     // 显示器设备名（"\\.\DISPLAY1"）
         public uint Dpi = 96;
         public double Scale = 1.0;     // = Dpi / 96
+
+        /// <summary>
+        /// 每屏位置记忆的身份键：设备名 + 整屏物理尺寸（2026-11-13）。
+        /// 只用设备名时，改分辨率/换缩放后旧偏移会被继续沿用（越界或贴边）；带上整屏尺寸，
+        /// 分辨率一变就是新键 → 自动回到默认位。取不到设备名时退化为纯尺寸键。
+        /// </summary>
+        public string Key
+        {
+            get
+            {
+                var size = Bounds.IsEmpty ? "0x0" : ((int)Math.Round(Bounds.Width)) + "x" + ((int)Math.Round(Bounds.Height));
+                return (string.IsNullOrEmpty(Device) ? "mon" : Device) + "@" + size;
+            }
+        }
     }
 
     /// <summary>
@@ -57,11 +73,14 @@ namespace PyTools.Core
             mi.CbSize = Marshal.SizeOf(typeof(NativeMethods.MonitorInfo));
             if (!NativeMethods.GetMonitorInfo(hMonitor, ref mi)) return new ScreenInfo();
             var rc = mi.RcWork;
+            var rcMon = mi.RcMonitor;
             var dpi = EffectiveDpi(hMonitor);
             return new ScreenInfo
             {
                 Available = true,
                 Work = new Rect(rc.Left, rc.Top, rc.Right - rc.Left, rc.Bottom - rc.Top),
+                Bounds = new Rect(rcMon.Left, rcMon.Top, rcMon.Right - rcMon.Left, rcMon.Bottom - rcMon.Top),
+                Device = mi.SzDevice ?? "",
                 Dpi = dpi,
                 Scale = dpi / 96.0
             };

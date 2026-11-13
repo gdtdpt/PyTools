@@ -794,12 +794,14 @@ namespace PyTools
 
             width = _config.BoundsWidth;
             if (double.IsNaN(width) || width <= 0) width = 640;
-            var dipWork = ScreenLayout.WorkAreaDip(ScreenLayout.CursorScreen());
+            var screen = ScreenLayout.CursorScreen();
+            var dipWork = ScreenLayout.WorkAreaDip(screen);
             double left, top;
-            if (!dipWork.IsEmpty && !double.IsNaN(_config.SummonOffsetX) && !double.IsNaN(_config.SummonOffsetY))
+            double offsetX, offsetY;
+            if (!dipWork.IsEmpty && _config.TryGetSummonOffset(screen.Key, out offsetX, out offsetY))
             {
-                left = dipWork.Left + _config.SummonOffsetX;
-                top = dipWork.Top + _config.SummonOffsetY;
+                left = dipWork.Left + offsetX;
+                top = dipWork.Top + offsetY;
             }
             else if (!dipWork.IsEmpty)
             {
@@ -1021,22 +1023,42 @@ namespace PyTools
             if (ScreenLayout.TryGetWindowRect(hwnd, out current) && current.Height > 0)
                 heightPx = (int)Math.Round(current.Height);
 
+            // 默认位：目标屏内水平居中 + 垂直上 1/3
+            var centerLeft = screen.Work.Left + (screen.Work.Width - widthPx) / 2.0;
+            var defaultTop = screen.Work.Top + screen.Work.Height / 3.0;
+
             double left, top;
-            if (!double.IsNaN(_config.SummonOffsetX) && !double.IsNaN(_config.SummonOffsetY))
+            string source;
+            double offsetX, offsetY;
+            if (_config.TryGetSummonOffset(screen.Key, out offsetX, out offsetY))
             {
-                left = screen.Work.Left + _config.SummonOffsetX * scale;
-                top = screen.Work.Top + _config.SummonOffsetY * scale;
+                left = screen.Work.Left + offsetX * scale;
+                top = screen.Work.Top + offsetY * scale;
+                // 记忆是「这块屏 + 这个分辨率」下的（键含整屏物理尺寸），理论上必然装得下；
+                // 但显示器排列/任务栏变化会让它越界。越界就退回默认居中位，而不是让它骑在屏幕边缘
+                // ——那正是「右侧留白小于左侧」这个观感的来源。
+                if (left < screen.Work.Left || left + widthPx > screen.Work.Right + 1)
+                {
+                    left = centerLeft; top = defaultTop; source = "memory-oob->default";
+                }
+                else source = "memory";
             }
             else
             {
-                // 无有效偏移（首次运行 / 旧语义作废）→ 默认位。历史 windowBounds 是 DIP 口径，
+                // 无该屏记忆（首次运行 / 换屏 / 旧语义作废）→ 默认位。历史 windowBounds 是 DIP 口径，
                 // 不能当物理像素沿用（scale≠1 时偏到左上），位置记忆从首次收起重新建立。
-                left = screen.Work.Left + (screen.Work.Width - widthPx) / 2.0;   // 水平居中
-                top = screen.Work.Top + screen.Work.Height / 3.0;                // 垂直上三分之一
+                left = centerLeft;
+                top = defaultTop;
+                source = "default";
             }
 
             var clamped = ScreenLayout.ClampIntoWork(screen.Work, left, top, widthPx, 80 * scale, 120 * scale);
             PlacePhysical(hwnd, clamped.Item1, clamped.Item2, widthPx, heightPx);
+            Logger.Info("summon place [" + source + "] key=" + screen.Key
+                + " work=" + (int)screen.Work.Left + "," + (int)screen.Work.Top
+                + " " + (int)screen.Work.Width + "x" + (int)screen.Work.Height
+                + " scale=" + scale.ToString("0.##")
+                + " -> " + (int)clamped.Item1 + "," + (int)clamped.Item2 + " w=" + widthPx);
         }
 
         /// <summary>取不到显示器信息时的兜底：旧虚拟桌面 DIP 口径（单屏场景等价）。</summary>
@@ -1117,7 +1139,7 @@ namespace PyTools
         {
             var dipWork = ScreenLayout.WorkAreaDip(screen);
             if (!dipWork.IsEmpty)
-                _config.SaveSummonOffset(dipBounds.Left - dipWork.Left, dipBounds.Top - dipWork.Top);
+                _config.SaveSummonOffset(screen.Key, dipBounds.Left - dipWork.Left, dipBounds.Top - dipWork.Top);
             _config.SaveBounds(dipBounds.Left, dipBounds.Top, dipBounds.Width, dipBounds.Height);
         }
 

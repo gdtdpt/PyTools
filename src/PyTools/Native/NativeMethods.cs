@@ -75,13 +75,18 @@ namespace PyTools.Native
         [StructLayout(LayoutKind.Sequential)]
         public struct NativeRect { public int Left; public int Top; public int Right; public int Bottom; }
 
-        [StructLayout(LayoutKind.Sequential)]
+        /// <summary>MONITORINFOEX：比 MONITORINFO 多一个显示器设备名（"\\.\DISPLAY1"）。
+        /// 设备名是「每屏独立位置记忆」的身份来源（2026-11-13）：只按工作区几何记忆会在
+        /// 两块屏工作区宽度不同的机器上互相污染（小屏被搬到偏右）。</summary>
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
         public struct MonitorInfo
         {
             public int CbSize;
             public NativeRect RcMonitor;
             public NativeRect RcWork;
             public uint DwFlags;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+            public string SzDevice; // CCHDEVICENAME
         }
 
         public const uint MonitorDefaultToNearest = 2;
@@ -97,7 +102,8 @@ namespace PyTools.Native
         [DllImport("user32.dll")]
         public static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);
 
-        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        /// <summary>取 MONITORINFOEX（含设备名）。CharSet 必须与结构体的 ByValTStr 一致（Unicode）。</summary>
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool GetMonitorInfo(IntPtr hMonitor, ref MonitorInfo lpmi);
 

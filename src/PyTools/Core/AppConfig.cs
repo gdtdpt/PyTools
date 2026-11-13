@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Windows;
 using System.Web.Script.Serialization;
 
 namespace PyTools.Core
@@ -21,12 +22,13 @@ namespace PyTools.Core
         public List<string> AppDirs = new List<string>();
         public bool AddAppContextMenu = false;
         public double BoundsX = double.NaN, BoundsY = double.NaN, BoundsWidth = 640, BoundsHeight = 420;
-        // 呼出位置记忆 v2（2026-11-09 跟随鼠标所在屏）：相对「其所在屏工作区原点」的偏移（DIP）。
-        // NaN = 旧配置尚未迁移，呼出时按旧绝对坐标口径定位一次，首次 SavePosition 后即写入新字段。
-        public double SummonOffsetX = double.NaN, SummonOffsetY = double.NaN;
+        // 呼出位置记忆（2026-11-13 改为**每屏独立**）：键 = ScreenInfo.Key（设备名@整屏物理尺寸），
+        // 值 = 相对**该屏**工作区原点的偏移（DIP）。全局单一偏移在两块屏工作区宽度不同时必然错位：
+        // 小屏会把大屏的左边距原样搬过来，右侧留白被挤掉（rc8 双屏真机反馈）。
+        private readonly Dictionary<string, Point> _summonOffsets = new Dictionary<string, Point>();
 
-        /// <summary>偏移字段的坐标语义版本（2 = 相对所在屏工作区原点的 DIP）。版本不符的旧值一律作废。</summary>
-        public const int SummonOffsetVersion = 2;
+        /// <summary>偏移字段的坐标语义版本（3 = 每屏独立；2 及更早 = 全局单一，跨屏错位，一律作废）。</summary>
+        public const int SummonOffsetVersion = 3;
 
         // ---- v2 新增键（v2. 前缀）----
         public bool LiteMode = false;
@@ -77,18 +79,11 @@ namespace PyTools.Core
             EncodeDirection = GetString("v2.encodeDirection", EncodeDirection);
             Theme = GetString("v2.theme", Theme);
             if (Theme != "dark" && Theme != "system") Theme = "light"; // 宽容：未知值回浅色
-            // 偏移只在语义版本匹配时信任（2026-11-12）：rc5 时代以错误坐标语义落盘的旧偏移
-            // 必须作废——无版本标记/版本不符一律按未迁移处理，下次呼出走默认位后重新落盘
-            if (GetNumber(_raw, "v2.summonOffsetVer", 0) == SummonOffsetVersion)
-            {
-                SummonOffsetX = GetNumber(_raw, "v2.summonOffsetX", SummonOffsetX);
-                SummonOffsetY = GetNumber(_raw, "v2.summonOffsetY", SummonOffsetY);
-            }
-            else
-            {
-                SummonOffsetX = double.NaN;
-                SummonOffsetY = double.NaN;
-            }
+            // 偏移只在语义版本匹配时信任（2026-11-12/13）：rc5 时代以错误坐标语义落盘的旧偏移、
+            // 以及版本 2 的「全局单一偏移」都必须作废——无版本标记/版本不符一律按无记忆处理，
+            // 下次呼出走默认位后重新落盘。
+            if (GetNumber(_raw, "v2.summonOffsetVer", 0) == SummonOffsetVersion) LoadSummonOffsets();
+            else _summonOffsets.Clear();
 
             var bounds = _raw.ContainsKey("windowBounds") ? _raw["windowBounds"] as Dictionary<string, object> : null;
             if (bounds != null)
@@ -115,14 +110,15 @@ namespace PyTools.Core
             catch (Exception ex) { Logger.Error("save bounds failed: " + ex.Message); }
         }
 
-        /// <summary>清除位置记忆（下次呼出走默认位：目标屏内水平居中、垂直上 1/3）。设置窗口「恢复默认位置」调用。</summary>
+        /// <summary>清除全部位置记忆（下次呼出走默认位：目标屏内水平居中、垂直上 1/3）。设置窗口「恢复默认位置」调用。</summary>
         public void ResetBounds()
         {
             BoundsX = double.NaN; BoundsY = double.NaN;
-            SummonOffsetX = double.NaN; SummonOffsetY = double.NaN;
+            _summonOffsets.Clear();
             try
             {
                 _raw.Remove("windowBounds");
+                _raw.Remove("v2.summonOffsets");
                 _raw.Remove("v2.summonOffsetX");
                 _raw.Remove("v2.summonOffsetY");
                 _raw.Remove("v2.summonOffsetVer");
@@ -131,28 +127,47 @@ namespace PyTools.Core
             catch (Exception ex) { Logger.Error("reset bounds failed: " + ex.Message); }
         }
 
-        /// <summary>呼出位置偏移写入（相对所在屏工作区原点，DIP）。NaN = 清除记忆。</summary>
-        public void SaveSummonOffset(double offsetX, double offsetY)
+        /// <summary>取某块屏的记忆偏移（DIP，相对该屏工作区原点）。无记忆 = false → 调用方走默认位。</summary>
+        public bool TryGetSummonOffset(string screenKey, out double offsetX, out double offsetY)
         {
-            SummonOffsetX = offsetX; SummonOffsetY = offsetY;
-            try
-            {
-                // JavaScriptSerializer 不支持 NaN，无值时必须删键而不是写 NaN
-                if (double.IsNaN(offsetX) || double.IsNaN(offsetY))
-                {
-                    _raw.Remove("v2.summonOffsetX");
-                    _raw.Remove("v2.summonOffsetY");
-                    _raw.Remove("v2.summonOffsetVer");
-                }
-                else
-                {
-                    _raw["v2.summonOffsetX"] = offsetX;
-                    _raw["v2.summonOffsetY"] = offsetY;
-                    _raw["v2.summonOffsetVer"] = SummonOffsetVersion;
-                }
-                WriteBack();
-            }
+            offsetX = double.NaN; offsetY = double.NaN;
+            if (string.IsNullOrEmpty(screenKey)) return false;
+            Point p;
+            if (!_summonOffsets.TryGetValue(screenKey, out p)) return false;
+            offsetX = p.X; offsetY = p.Y;
+            return true;
+        }
+
+        /// <summary>已记忆的屏数（自测/诊断用）。</summary>
+        public int SummonOffsetCount { get { return _summonOffsets.Count; } }
+
+        /// <summary>写下某块屏的记忆偏移（DIP）。只覆盖这一块屏的条目，其它屏互不影响。</summary>
+        public void SaveSummonOffset(string screenKey, double offsetX, double offsetY)
+        {
+            if (string.IsNullOrEmpty(screenKey) || double.IsNaN(offsetX) || double.IsNaN(offsetY)) return;
+            _summonOffsets[screenKey] = new Point(offsetX, offsetY);
+            try { WriteBack(); }
             catch (Exception ex) { Logger.Error("save summon offset failed: " + ex.Message); }
+        }
+
+        private void LoadSummonOffsets()
+        {
+            _summonOffsets.Clear();
+            object node;
+            if (!_raw.TryGetValue("v2.summonOffsets", out node)) return;
+            // JavaScriptSerializer 把 JSON 对象反序列化成 Dictionary<string,object>（数组才是 ArrayList，
+            // 所以下面逐键存 {x,y} 对象而不是 [x,y]，避免踩 ArrayList 的坑）
+            var map = node as Dictionary<string, object>;
+            if (map == null) return;
+            foreach (var kv in map)
+            {
+                var one = kv.Value as Dictionary<string, object>;
+                if (one == null) continue;
+                var x = GetNumber(one, "x", double.NaN);
+                var y = GetNumber(one, "y", double.NaN);
+                if (double.IsNaN(x) || double.IsNaN(y)) continue;
+                _summonOffsets[kv.Key] = new Point(x, y);
+            }
         }
 
         public void SaveLiteMode(bool lite)
@@ -206,18 +221,22 @@ namespace PyTools.Core
             _raw["v2.encodeFormat"] = EncodeFormat;
             _raw["v2.encodeDirection"] = EncodeDirection;
             _raw["v2.theme"] = Theme;
-            // 偏移可能仍是 NaN（未迁移/被版本检查作废）：JavaScriptSerializer 不支持 NaN，有值才写键（键缺失 = MapFromRaw 读回 NaN）
-            if (!double.IsNaN(SummonOffsetX) && !double.IsNaN(SummonOffsetY))
+            // 每屏位置记忆：无记忆时不写键（键缺失 = 读回空字典）。旧版「全局单一偏移」的扁平键
+            // 一律清除——留着只会让后续版本或 v1 读到一个语义已废的坐标。
+            _raw.Remove("v2.summonOffsetX");
+            _raw.Remove("v2.summonOffsetY");
+            if (_summonOffsets.Count == 0)
             {
-                _raw["v2.summonOffsetX"] = SummonOffsetX;
-                _raw["v2.summonOffsetY"] = SummonOffsetY;
-                _raw["v2.summonOffsetVer"] = SummonOffsetVersion;
+                _raw.Remove("v2.summonOffsets");
+                _raw.Remove("v2.summonOffsetVer");
             }
             else
             {
-                _raw.Remove("v2.summonOffsetX");
-                _raw.Remove("v2.summonOffsetY");
-                _raw.Remove("v2.summonOffsetVer");
+                var offsets = new Dictionary<string, object>();
+                foreach (var kv in _summonOffsets)
+                    offsets[kv.Key] = new Dictionary<string, object> { { "x", kv.Value.X }, { "y", kv.Value.Y } };
+                _raw["v2.summonOffsets"] = offsets;
+                _raw["v2.summonOffsetVer"] = SummonOffsetVersion;
             }
             var dir = Path.GetDirectoryName(_path);
             if (!string.IsNullOrEmpty(dir)) System.IO.Directory.CreateDirectory(dir);

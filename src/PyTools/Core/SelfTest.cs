@@ -110,47 +110,69 @@ namespace PyTools.Core
                 return null;
             }));
 
-            results.Add(Test("多屏定位：呼出偏移字段读写与 NaN 不落盘", () =>
+            results.Add(Test("多屏定位：每屏记忆键 = 设备名@整屏物理尺寸", () =>
+            {
+                var a = new ScreenInfo { Available = true, Device = @"\\.\DISPLAY1", Bounds = new Rect(0, 0, 2736, 1800) };
+                var b = new ScreenInfo { Available = true, Device = @"\\.\DISPLAY1", Bounds = new Rect(0, 0, 1920, 1080) };
+                var c = new ScreenInfo { Available = true, Device = @"\\.\DISPLAY2", Bounds = new Rect(0, 0, 2736, 1800) };
+                if (a.Key == b.Key) return "同设备不同分辨率应产生不同键（改分辨率要回默认位）";
+                if (a.Key == c.Key) return "同尺寸不同设备应产生不同键（两屏记忆不得互相污染）";
+                if (a.Key != @"\\.\DISPLAY1@2736x1800") return "键格式不符: " + a.Key;
+                if (new ScreenInfo().Key != "mon@0x0") return "退化键不符: " + new ScreenInfo().Key;
+                return null;
+            }));
+
+            results.Add(Test("多屏定位：呼出偏移按屏独立记忆（互不覆盖 / 可整体清除）", () =>
             {
                 var path = Path.Combine(Path.GetTempPath(), "pytools-selftest-" + Guid.NewGuid().ToString("N") + ".json");
                 try
                 {
-                    // 旧配置（无偏移键）→ 读回 NaN
+                    // 旧配置（无偏移键）→ 无记忆
                     File.WriteAllText(path, "{\"v2.pageStep\":5}");
                     var cfg = AppConfig.Load(path);
-                    if (!double.IsNaN(cfg.SummonOffsetX) || !double.IsNaN(cfg.SummonOffsetY)) return "旧配置应读回 NaN";
-                    cfg.SaveBounds(1, 2, 640, 420); // NaN 期间落盘不得把 NaN 写进 JSON
-                    var mid = File.ReadAllText(path);
-                    if (mid.Contains("summonOffset")) return "NaN 偏移被序列化";
-                    // 保存偏移 → 重载读回
-                    cfg.SaveSummonOffset(120.5, 240.25);
+                    double ox, oy;
+                    if (cfg.TryGetSummonOffset(@"\\.\DISPLAY1@2736x1800", out ox, out oy)) return "旧配置不应有记忆";
+                    cfg.SaveBounds(1, 2, 640, 420); // 无记忆期间落盘不得凭空写偏移键
+                    if (File.ReadAllText(path).Contains("summonOffset")) return "无记忆时被写入了偏移键";
+                    // 两块屏各存一份 → 互不覆盖，回读一致
+                    cfg.SaveSummonOffset(@"\\.\DISPLAY1@2736x1800", 364, 300);
+                    cfg.SaveSummonOffset(@"\\.\DISPLAY2@1280x1024", 320, 300);
                     var reloaded = AppConfig.Load(path);
-                    if (reloaded.SummonOffsetX != 120.5 || reloaded.SummonOffsetY != 240.25)
-                        return "偏移回读不符: " + reloaded.SummonOffsetX + "," + reloaded.SummonOffsetY;
-                    if (!File.ReadAllText(path).Contains("v2.summonOffsetX")) return "偏移键未落盘";
-                    if (!File.ReadAllText(path).Contains("\"v2.summonOffsetVer\":2")) return "偏移版本键未落盘";
-                    // 恢复默认位置清除
+                    if (!reloaded.TryGetSummonOffset(@"\\.\DISPLAY1@2736x1800", out ox, out oy) || ox != 364 || oy != 300)
+                        return "屏1 记忆回读不符: " + ox + "," + oy;
+                    if (!reloaded.TryGetSummonOffset(@"\\.\DISPLAY2@1280x1024", out ox, out oy) || ox != 320 || oy != 300)
+                        return "屏2 记忆回读不符: " + ox + "," + oy;
+                    if (reloaded.SummonOffsetCount != 2) return "记忆条数错: " + reloaded.SummonOffsetCount;
+                    var json = File.ReadAllText(path);
+                    if (!json.Contains("v2.summonOffsets")) return "偏移键未落盘";
+                    if (!json.Contains("\"v2.summonOffsetVer\":3")) return "偏移版本键未落盘";
+                    // 恢复默认位置 → 全部清除
                     reloaded.ResetBounds();
                     var cleared = AppConfig.Load(path);
-                    if (!double.IsNaN(cleared.SummonOffsetX) || !double.IsNaN(cleared.SummonOffsetY)) return "ResetBounds 未清偏移";
+                    if (cleared.SummonOffsetCount != 0) return "ResetBounds 未清偏移";
                     return null;
                 }
                 finally { try { File.Delete(path); } catch { } }
             }));
 
-            results.Add(Test("多屏定位：旧语义偏移（无版本键）作废", () =>
+            results.Add(Test("多屏定位：旧版全局单一偏移（ver≤2 / 无版本键）作废并清理", () =>
             {
                 var path = Path.Combine(Path.GetTempPath(), "pytools-selftest-" + Guid.NewGuid().ToString("N") + ".json");
                 try
                 {
-                    // rc5 时代落盘的偏移没有版本键 → 必须作废（NaN），呼出走默认位
-                    File.WriteAllText(path, "{\"v2.summonOffsetX\":364,\"v2.summonOffsetY\":300,\"windowBounds\":{\"x\":364,\"y\":300,\"width\":640,\"height\":420}}");
+                    // ver=2 的全局偏移（rc8 语义）：跨屏必然错位，必须作废
+                    File.WriteAllText(path, "{\"v2.summonOffsetVer\":2,\"v2.summonOffsetX\":364,\"v2.summonOffsetY\":300,\"windowBounds\":{\"x\":364,\"y\":300,\"width\":640,\"height\":420}}");
                     var cfg = AppConfig.Load(path);
-                    if (!double.IsNaN(cfg.SummonOffsetX) || !double.IsNaN(cfg.SummonOffsetY)) return "无版本键的旧偏移未被作废";
-                    // 版本不符同理
-                    File.WriteAllText(path, "{\"v2.summonOffsetVer\":1,\"v2.summonOffsetX\":10,\"v2.summonOffsetY\":10}");
+                    double ox, oy;
+                    if (cfg.TryGetSummonOffset(@"\\.\DISPLAY1@2736x1800", out ox, out oy)) return "ver=2 的全局偏移未被作废";
+                    if (cfg.SummonOffsetCount != 0) return "ver=2 的偏移仍留在记忆里";
+                    // 无版本键（rc5 时代）同理
+                    File.WriteAllText(path, "{\"v2.summonOffsetX\":10,\"v2.summonOffsetY\":10}");
                     var cfg2 = AppConfig.Load(path);
-                    if (!double.IsNaN(cfg2.SummonOffsetX) || !double.IsNaN(cfg2.SummonOffsetY)) return "版本不符的旧偏移未被作废";
+                    if (cfg2.SummonOffsetCount != 0) return "无版本键的旧偏移未被作废";
+                    // 写回时必须顺手清掉旧扁平键，不留语义已废的坐标
+                    cfg2.SaveSummonOffset(@"\\.\DISPLAY1@1920x1080", 100, 100);
+                    if (File.ReadAllText(path).Contains("v2.summonOffsetX")) return "旧扁平键未清除";
                     return null;
                 }
                 finally { try { File.Delete(path); } catch { } }

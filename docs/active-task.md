@@ -2,30 +2,33 @@
 
 > **仓库剥离说明（2026-11-06）**：本仓库由旧仓库 `pytools` 的 `v2/` 子目录经 `git subtree split` 剥离而来，26 个提交历史连续（作者已统一重写为 gdtdpt）。文中提及的 `40afd24` 等提交号在剥离重写后已变化（旧号仅作历史索引）；提及 `v2/...` 的路径一律对应本仓库根。
 
-状态：**2.0.0-rc8 预发布包构建，待双屏/单屏真机验证（2026-11-12）**，rc1 之后新增待验收提交：var 截断气泡（`f65b396`）、多行编辑区滚动条贴底 + encode/regex 自动换行（`d4a03a3`）、暗色+简洁模式整窗发白修复（`f81d005`）、呼出窗跟随鼠标所在屏（`addf62a`，混合 DPI 物理像素返工 + 旧偏移/旧坐标作废见下）、带参 lnk 启动报 193 修复（2026-11-09 真机踩到：Chrome 开始菜单快捷方式自带 `--source-shortcut-location=start-menu`，CreateProcess 直接对 .lnk 报 ERROR_BAD_EXE_FORMAT；修复为带参分支 spawn 解析后的 TargetPath + 存在性检查按真实目标判定 + SaveSummonOffset 补落盘，selftest 101 项全过，Chrome 条目探针实测启动成功）；tools 工具列表 + 内置工具图标已验收（剥离前提交 `40afd24`，selftest 96 项全过；含验收反馈修复：列表行图标-文字间距）；明暗主题已验收提交（`fab53a0`，2026-11-05，selftest 94 项全过）；code-naming 已验收提交（`3f5483e`，2026-11-05，M4 AI 批第四消费者收官，selftest 93 项全过）；ai-translate 已验收提交（`f08fb91`，2026-11-05，M4 AI 批第三个消费者，selftest 90 项全过）；剪贴板文件条目打磨 + 写回重试 + 滚动复位已验收提交（`e776f9f`，selftest 88）；ai-ocr 已验收提交（`46cf1ff`，M4 AI 批第二个消费者，selftest 87）；regex AI 生成 POC 已验收提交（`dfc3b9d`）；diff F3 备用键 N/P 已验收（`31794b4`）；diff 行号列水平固定已验收（`6f4cb64`）；text-diff 已验收提交（2026-11-04）；regex-tool / S10 自启清理已提交（2026-11-04）；此前 UI 控件规范化（`155e9a9`）/ cron（`e1e1ea7`）/ encoding-converter（`6af788d`）/ format 间距（`4ca3c72`）/ 剪贴板 alpha（`05daf1d`）已验收提交；dev-values 用户暂缓，env-switcher 归 M5；另有待排期需求「diff 历史记录」（见下）
-更新时间：2026-11-09
+状态：**2.0.0-rc9 预发布包构建，待双屏/单屏真机验证（2026-11-13）**，rc1 之后新增待验收提交：呼出位置改为**每屏独立记忆**（rc9，见下）、var 截断气泡（`f65b396`）、多行编辑区滚动条贴底 + encode/regex 自动换行（`d4a03a3`）、暗色+简洁模式整窗发白修复（`f81d005`）、呼出窗跟随鼠标所在屏（`addf62a`，混合 DPI 物理像素返工 + 旧偏移/旧坐标作废见下）、带参 lnk 启动报 193 修复（2026-11-09 真机踩到：Chrome 开始菜单快捷方式自带 `--source-shortcut-location=start-menu`，CreateProcess 直接对 .lnk 报 ERROR_BAD_EXE_FORMAT；修复为带参分支 spawn 解析后的 TargetPath + 存在性检查按真实目标判定 + SaveSummonOffset 补落盘，selftest 101 项全过，Chrome 条目探针实测启动成功）；tools 工具列表 + 内置工具图标已验收（剥离前提交 `40afd24`，selftest 96 项全过；含验收反馈修复：列表行图标-文字间距）；明暗主题已验收提交（`fab53a0`，2026-11-05，selftest 94 项全过）；code-naming 已验收提交（`3f5483e`，2026-11-05，M4 AI 批第四消费者收官，selftest 93 项全过）；ai-translate 已验收提交（`f08fb91`，2026-11-05，M4 AI 批第三个消费者，selftest 90 项全过）；剪贴板文件条目打磨 + 写回重试 + 滚动复位已验收提交（`e776f9f`，selftest 88）；ai-ocr 已验收提交（`46cf1ff`，M4 AI 批第二个消费者，selftest 87）；regex AI 生成 POC 已验收提交（`dfc3b9d`）；diff F3 备用键 N/P 已验收（`31794b4`）；diff 行号列水平固定已验收（`6f4cb64`）；text-diff 已验收提交（2026-11-04）；regex-tool / S10 自启清理已提交（2026-11-04）；此前 UI 控件规范化（`155e9a9`）/ cron（`e1e1ea7`）/ encoding-converter（`6af788d`）/ format 间距（`4ca3c72`）/ 剪贴板 alpha（`05daf1d`）已验收提交；dev-values 用户暂缓，env-switcher 归 M5；另有待排期需求「diff 历史记录」（见下）
+更新时间：2026-11-13
 
-## 呼出窗跟随鼠标所在屏（2026-11-09 定案，11-10 全程物理像素，11-12 旧偏移/旧坐标作废，待真机验收）
+## 呼出窗跟随鼠标所在屏（2026-11-09 定案，11-10 全程物理像素，11-12 旧偏移/旧坐标作废，11-13 每屏独立记忆，待真机验收）
 
 拍板：选屏依据 = **鼠标位置**（用户确认）；不加设置项。
 
-**旧偏移作废（2026-11-12 真机反馈：两屏都能显示但都压在左下角）**：rc5 时代以错误坐标语义落盘的 `v2.summonOffsetX/Y`（且部分值来自飞屏状态的 clamp 残迹）被 rc6 直接信任——换算后超出屏高 → `ClampIntoWork` 钳到「屏底保留 120px 可见」+ 左缘，正是截图的左下角贴边形态。修法：新增 **`v2.summonOffsetVer`（当前 = 2）** 标记偏移的坐标语义版本；`Load` 时版本缺失/不符一律作废（NaN），呼出走默认位（目标屏水平居中、垂直上 1/3），首次收起重新落盘并写入版本键；`SaveSummonOffset`/`WriteBack`/`ResetBounds` 三处同步维护版本键。selftest 103 项全过（新增：无版本键偏移作废、版本不符作废、保存后版本键落盘）。
+**每屏独立记忆（2026-11-13 真机反馈：双屏里小分辨率屏水平不对称——搜索框显得特别宽、右侧留白明显小于左侧，大屏正常）**：根因是位置记忆只有**一份全局偏移**（`v2.summonOffsetX/Y`，语义 = 相对「当前屏」工作区原点的 DIP）。两块屏工作区 DIP 宽度不同时，在大屏居中记下的左边距会被原样搬到窄屏 —— 窄屏 `work.Width - offsetX - width` 明显小于 `offsetX`，窗口整体偏右、右侧贴边，又因屏窄显得窗口特别宽。修法：记忆改**每屏一份**，键 = `设备名@整屏物理尺寸`（`MONITORINFOEX.szDevice` + `rcMonitor`；改分辨率即换键 → 自动回默认位）；该屏无记忆一律走默认位（水平居中 + 垂直上 1/3）；有记忆但换算后横向越界（显示器重排/任务栏变化）也退回默认位，不再让它骑在屏幕边缘。`v2.summonOffsetVer` 进位到 **3**，ver≤2 的全局偏移（含无版本键的 rc5 残值）Load 时作废、写回时物理删除。日志新增 `summon place [default|memory|memory-oob->default] key=… work=… scale=… -> x,y w=…` 一行记全落位依据。selftest **104** 项全过。
+
+**旧偏移作废（2026-11-12 真机反馈：两屏都能显示但都压在左下角）**：rc5 时代以错误坐标语义落盘的 `v2.summonOffsetX/Y`（且部分值来自飞屏状态的 clamp 残迹）被 rc6 直接信任——换算后超出屏高 → `ClampIntoWork` 钳到「屏底保留 120px 可见」+ 左缘，正是截图的左下角贴边形态。修法：新增 **`v2.summonOffsetVer`（rc6 时为 2，**rc9 起为 3 = 每屏独立**，见上）** 标记偏移的坐标语义版本；`Load` 时版本缺失/不符一律作废（NaN），呼出走默认位（目标屏水平居中、垂直上 1/3），首次收起重新落盘并写入版本键；`SaveSummonOffset`/`WriteBack`/`ResetBounds` 三处同步维护版本键。selftest 103 项全过（新增：无版本键偏移作废、版本不符作废、保存后版本键落盘）。
 
 **旧绝对坐标沿用分支删除（2026-11-12 真机反馈：单屏 rc7 变左上角）**：rc7 `EnsureOnScreen` 还有「旧 windowBounds 落在本屏工作区内则按物理像素沿用」的迁移分支——但历史版本落盘的 `windowBounds` 全是 **DIP** 口径（WPF Left/Top），当物理像素用在 scale≠1 屏上坐标只有一半 → 落在左上区域，且首次收起后偏移记忆忠实固化错位。修法：删除该分支，无有效 ver=2 偏移一律走默认位；`EnsureOnScreenLegacy`（DIP×DIP 口径一致）保留为句柄/显示器取不到时的兜底。探针复现（旧 DIP windowBounds + 无版本键）：窗口落在 rel x=0.50/y=0.40（水平居中、垂直上 1/3），Esc 后新语义落盘 offset=物理位÷scale 精确。
 
 **混合 DPI 返工原因（2026-11-10 真机反馈：高分辨率屏呼出偏左下、低分辨率屏看不到窗口）**：首版把「物理像素工作区」用**单一全局系数**折算成 DIP（`VirtualScreenWidth / SM_CXVIRTUALSCREEN`，本质是主屏/系统 DPI），再交给 WPF 的 `Left/Top`。混合 DPI 下每块屏的系数不同——副屏工作区原点被按主屏 DPI 折算后必然错位（缩放比 200% 的屏偏将近一屏宽度，100% 的屏整窗飞出）。⇒ 定位链一律改为**物理像素**。
 
-- **`Core/ScreenLayout.cs`**：`ScreenInfo`（工作区物理像素 + 该屏 DPI/Scale）；`CursorScreen()`（GetCursorPos→MonitorFromPoint→GetMonitorInfo）/`ScreenForWindow(hwnd)`（MonitorFromWindow）/`TryGetWindowRect(hwnd)`（GetWindowRect 物理像素）；`EffectiveDpi()` 走 `Shcore.GetDpiForMonitor(MDT_EFFECTIVE_DPI)`，逐屏取值、失败按 96 兜底；`WorkAreaDip()` 只在写配置时用（物理 ÷ **该屏** Scale）；`ClampIntoWork` 纯函数不变（单位无关）。
-- **`Native/NativeMethods.cs`**：+GetCursorPos/MonitorFromPoint/MonitorFromWindow/GetMonitorInfo/GetDpiForMonitor/GetWindowRect/SetWindowPos/GetSystemMetrics + POINT/RECT/MONITORINFO 结构（嵌套类内，引用处带 `NativeMethods.` 前缀）。
+- **`Core/ScreenLayout.cs`**：`ScreenInfo`（工作区物理像素 + 整屏物理矩形 + 设备名 + 该屏 DPI/Scale + `Key`＝每屏记忆身份）；`CursorScreen()`（GetCursorPos→MonitorFromPoint→GetMonitorInfo）/`ScreenForWindow(hwnd)`（MonitorFromWindow）/`TryGetWindowRect(hwnd)`（GetWindowRect 物理像素）；`EffectiveDpi()` 走 `Shcore.GetDpiForMonitor(MDT_EFFECTIVE_DPI)`，逐屏取值、失败按 96 兜底；`WorkAreaDip()` 只在写配置时用（物理 ÷ **该屏** Scale）；`ClampIntoWork` 纯函数不变（单位无关）。
+- **`Native/NativeMethods.cs`**：+GetCursorPos/MonitorFromPoint/MonitorFromWindow/GetMonitorInfo/GetDpiForMonitor/GetWindowRect/SetWindowPos/GetSystemMetrics + POINT/RECT/**MONITORINFOEX（含 `szDevice`，CharSet 必须与 ByValTStr 同为 Unicode）** 结构（嵌套类内，引用处带 `NativeMethods.` 前缀）。
 - **`App.xaml.cs` 定位链全部走物理像素**：
-  - `EnsureOnScreen`：先 `EnsureHandle()` 拿句柄 → 取鼠标所在屏 → 目标位置 = 屏工作区原点（物理）+ 配置偏移 × **该屏 Scale**；新配置走偏移，旧绝对坐标若落在本屏工作区内按物理像素沿用（单屏 100% 时代相等），否则水平居中、垂直上 1/3；`ClampIntoWork` 用物理像素口径（minVisible 也乘 Scale）→ `PlacePhysical()` 用 `SetWindowPos(SWP_NOZORDER|SWP_NOACTIVATE)` 落位，高度传 0 交给 SizeToContent。
+  - `EnsureOnScreen`：先 `EnsureHandle()` 拿句柄 → 取鼠标所在屏 → 该屏有记忆则「工作区原点（物理）+ 偏移 × **该屏 Scale**」，无记忆或记忆横向越界则默认位（水平居中、垂直上 1/3）；`ClampIntoWork` 用物理像素口径（minVisible 也乘 Scale）→ `PlacePhysical()` 用 `SetWindowPos(SWP_NOZORDER|SWP_NOACTIVATE)` 落位，高度传 0 交给 SizeToContent；末尾 INFO 日志一行记全落位依据。
   - `SettlePlacement()` 两拍（立即 + 200ms）兜住 DPI 变更回调的异步重算——跨屏呼出时 WPF 会按新屏 DPI 重排，晚一拍校正防偏移。
   - `SavePosition()`：改从 `GetWindowRect` 读物理像素，按窗口所在屏 Scale 折回 DIP 后写「相对该屏工作区的偏移」+ 旧 windowBounds；三处落盘点（收起/工具还原点/退出）统一走这里。
   - `TargetRectFor` clamp 参照从虚拟桌面收窄到「窗口当前所在屏」（固定尺寸模式不再骑缝）。
   - `EnsureOnScreenLegacy()`：句柄/显示器信息取不到时的原口径兜底。
-- **`Core/AppConfig.cs`**：+`SummonOffsetX/Y`（v2.summonOffsetX/Y，NaN=未迁移）；`SaveSummonOffset` **自己落盘**（此前依赖后续 SaveBounds 顺带写，selftest 单独调用即暴露）；ResetBounds 一并清除；WriteBack 只在非 NaN 时写键（JavaScriptSerializer 不支持 NaN）。
-- **`Core/SelfTest.cs`**：+2（ClampIntoWork 五断言；偏移读写/NaN 不落盘/ResetBounds 回环），累计 **102**。
+- **`Core/AppConfig.cs`**：位置记忆改**每屏一份** `_summonOffsets`（键＝`ScreenInfo.Key`，值＝相对该屏工作区原点的 DIP 偏移，落盘 `v2.summonOffsets:{key:{x,y}}` + `v2.summonOffsetVer:3`）；`TryGetSummonOffset/SaveSummonOffset(screenKey,…)` 按屏读写，`ResetBounds` 整体清除；旧的扁平键 `v2.summonOffsetX/Y` 在 WriteBack 里物理删除（语义已废，留着会被后续版本或 v1 误读）。**不用 `[x,y]` 数组存点**：JavaScriptSerializer 把 JSON 数组反序列化成 `ArrayList`，`as object[]` 静默得 null。
+- **`Core/SelfTest.cs`**：+3（每屏键身份：同设备不同分辨率/同尺寸不同设备必须不同键；按屏读写互不覆盖 + ResetBounds 全清 + ver=3 落盘；ver≤2 与无版本键作废旧值并清理扁平键），累计 **104**。
 - **单屏 200% 探针回归**（.Probe 锁 + 临时 config，probe 自身 PerMonitorV2）：首屏落位完全在工作区内、偏移落盘 (39.5, 75) 与物理位精确对应、移鼠标后热键再呼出**位置精确复现**；cron 固定尺寸模式 200% 下尺寸/文字清晰无裁切。⚠️ 探针 exe 必须在改锁名**之后**构建（旧 exe 会被用户实例静默顶掉，两次踩中）。
+- **rc9 每屏记忆探针**（本机 2880×1800 @200%，物理工作区 2736×1800）：① 无配置 → `[default] -> 728,600 w=1280`（= (2736−1280)/2, 1800/3）；② 造 `{键:{364,300}}` → `[memory] -> 728,600`；③ 造越界 1300 → `[memory-oob->default] -> 728,600`；④ 只给另一块屏的键 → `[default]`。Esc 收起后落盘 `{"\\.\DISPLAY1@2880x1800":{"x":364,"y":300}}` + `"v2.summonOffsetVer":3`，扁平键已消失。
 
 **双屏真机验收清单（用户执行）**：
 1. 鼠标在 A 屏呼出 → A 屏记忆位；鼠标移到 B 屏呼出 → B 屏对应位（同一相对位置）
@@ -33,6 +36,7 @@
 3. cron/regex/translate/naming 固定尺寸模式同样跟随、不骑缝
 4. 混合 DPI：高分辨率屏呼出居中/记忆位准确，低分辨率屏可见且完全在工作区内
 5. 两屏来回呼出多次不漂移（偏移是相对各自屏工作区的，不是相对光标或全局原点）
+6. **rc9 重点**：窄屏首次呼出必须水平居中（左右留白相等、不再贴右边）；两屏各自拖动后收起，再各自呼出互不影响；日志 `summon place [...] key=…` 里窄屏首次应为 `[default]`
 
 ### tools 工具列表 + 工具图标已实现清单（2026-11-06，待真机验收）
 
