@@ -158,6 +158,15 @@ namespace PyTools
 
                 _window = _config.LiteMode ? (SummonWindowBase)new SummonOpaqueWindow() : new SummonWindow();
                 _window.Width = _config.BoundsWidth; // 高度交给 SizeToContent（空态仅搜索框）
+                _window.DpiChanged += delegate
+                {
+                    // 跨屏/改缩放导致 DPI 变化：WPF 会按系统建议矩形（比例 = 新旧 DPI 比）重排窗口，
+                    // 与我们按目标屏预算好的尺寸冲突 → 下一拍把期望矩形连尺寸一起钉回
+                    var h = _window != null ? new WindowInteropHelper(_window).Handle : IntPtr.Zero;
+                    if (h != IntPtr.Zero)
+                        Dispatcher.BeginInvoke(new Action(delegate { ReapplyPlacedRect(h); }),
+                            System.Windows.Threading.DispatcherPriority.Loaded);
+                };
                 _view = (SummonView)_window.Content;
                 _view.Index = _index;
                 _view.PageStep = _config.PageStep;
@@ -1018,11 +1027,6 @@ namespace PyTools
             if (double.IsNaN(widthDip) || widthDip <= 0) widthDip = 640;
             var widthPx = (int)Math.Round(widthDip * scale);
 
-            var heightPx = 0; // 高度交给 SizeToContent：0 = 不改尺寸
-            Rect current;
-            if (ScreenLayout.TryGetWindowRect(hwnd, out current) && current.Height > 0)
-                heightPx = (int)Math.Round(current.Height);
-
             // 默认位：目标屏内水平居中 + 垂直上 1/3
             var centerLeft = screen.Work.Left + (screen.Work.Width - widthPx) / 2.0;
             var defaultTop = screen.Work.Top + screen.Work.Height / 3.0;
@@ -1053,7 +1057,7 @@ namespace PyTools
             }
 
             var clamped = ScreenLayout.ClampIntoWork(screen.Work, left, top, widthPx, 80 * scale, 120 * scale);
-            PlacePhysical(hwnd, clamped.Item1, clamped.Item2, widthPx, heightPx);
+            PlacePhysical(hwnd, clamped.Item1, clamped.Item2, widthPx);
             Logger.Info("summon place [" + source + "] key=" + screen.Key
                 + " work=" + (int)screen.Work.Left + "," + (int)screen.Work.Top
                 + " " + (int)screen.Work.Width + "x" + (int)screen.Work.Height
@@ -1078,35 +1082,57 @@ namespace PyTools
             _window.Top = top;
         }
 
-        /// <summary>物理像素落位。WPF 收到 DPI 变更后可能按系统建议矩形重排，所以延后两拍把左上角再钉一次（尺寸不动）。</summary>
-        private void PlacePhysical(IntPtr hwnd, double left, double top, int widthPx, int heightPx)
+        // 最近一次呼出落位的期望物理矩形（只有 x/y/width；高度交给 SizeToContent 自管）。
+        // 跨屏 DPI 切换时 WPF 会按系统建议矩形重排——建议矩形按「新旧 DPI 比」缩放**当前**尺寸，
+        // 而我们的尺寸已按**目标屏** DPI 预折算过，再缩一次必错（rc9 真机：200% 主屏 → 100% 副屏
+        // 被缩半，640px 变 320px，表现为「搜索栏很小且不居中」）。所以 DPI 变更后必须连尺寸一起钉回。
+        private bool _placedValid;
+        private int _placedX, _placedY, _placedW;
+
+        /// <summary>
+        /// 物理像素落位。必须**先挪位置、再设尺寸**：挪到目标屏会让 HWND 的 DPI 先切过去，
+        /// 随后的尺寸设置才落在目标屏 DPI 上；若先设好尺寸再挪，尺寸会被建议矩形按 DPI 比例再缩一次。
+        /// 落位后两拍 + DpiChanged 钩子把期望矩形钉回（WPF 应用建议矩形的时机不定，见 ReapplyPlacedRect）。
+        /// </summary>
+        private void PlacePhysical(IntPtr hwnd, double left, double top, int widthPx)
         {
-            var x = (int)Math.Round(left);
-            var y = (int)Math.Round(top);
-            NativeMethods.SetWindowPos(hwnd, IntPtr.Zero, x, y, widthPx, heightPx,
-                NativeMethods.SwpNoZOrder | NativeMethods.SwpNoActivate);
-            SettlePlacement(hwnd, x, y, 0);
-            SettlePlacement(hwnd, x, y, 200); // DPI 变更回调异步：第二拍兜住
+            _placedX = (int)Math.Round(left);
+            _placedY = (int)Math.Round(top);
+            _placedW = widthPx;
+            _placedValid = true;
+            NativeMethods.SetWindowPos(hwnd, IntPtr.Zero, _placedX, _placedY, 0, 0,
+                NativeMethods.SwpNoZOrder | NativeMethods.SwpNoActivate | NativeMethods.SwpNoSize);
+            ReapplyPlacedRect(hwnd);
+            SettlePlacement(hwnd, 0);
+            SettlePlacement(hwnd, 200); // DPI 变更回调异步：第二拍兜住
         }
 
-        private void SettlePlacement(IntPtr hwnd, int x, int y, int delayMs)
+        private void SettlePlacement(IntPtr hwnd, int delayMs)
         {
             if (delayMs <= 0)
             {
-                Dispatcher.BeginInvoke(new Action(delegate { PinTopLeft(hwnd, x, y); }),
+                Dispatcher.BeginInvoke(new Action(delegate { ReapplyPlacedRect(hwnd); }),
                     System.Windows.Threading.DispatcherPriority.Loaded);
                 return;
             }
             var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(delayMs) };
-            timer.Tick += delegate { timer.Stop(); PinTopLeft(hwnd, x, y); };
+            timer.Tick += delegate { timer.Stop(); ReapplyPlacedRect(hwnd); };
             timer.Start();
         }
 
-        private void PinTopLeft(IntPtr hwnd, int x, int y)
+        /// <summary>把期望矩形（x/y/width）钉回；高度沿用当前实际值。宽度与期望差 &gt;1px 记日志（DPI 重排错比例的信号）。</summary>
+        private void ReapplyPlacedRect(IntPtr hwnd)
         {
-            if (hwnd == IntPtr.Zero || _window == null || !_window.IsVisible || _toolSizeMode) return;
-            NativeMethods.SetWindowPos(hwnd, IntPtr.Zero, x, y, 0, 0,
-                NativeMethods.SwpNoZOrder | NativeMethods.SwpNoActivate | NativeMethods.SwpNoSize);
+            if (!_placedValid || hwnd == IntPtr.Zero || _window == null || _toolSizeMode) return;
+            Rect actual;
+            if (!ScreenLayout.TryGetWindowRect(hwnd, out actual) || actual.Width <= 0 || actual.Height <= 0) return;
+            var widthOff = Math.Abs(actual.Width - _placedW) > 1;
+            var posOff = (int)actual.Left != _placedX || (int)actual.Top != _placedY;
+            if (!widthOff && !posOff) return;
+            if (widthOff)
+                Logger.Info("place rescale corrected: actual w=" + (int)actual.Width + " expected=" + _placedW);
+            NativeMethods.SetWindowPos(hwnd, IntPtr.Zero, _placedX, _placedY, _placedW, (int)actual.Height,
+                NativeMethods.SwpNoZOrder | NativeMethods.SwpNoActivate);
         }
 
         /// <summary>
