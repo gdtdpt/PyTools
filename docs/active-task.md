@@ -2,8 +2,8 @@
 
 > **仓库剥离说明（2026-11-06）**：本仓库由旧仓库 `pytools` 的 `v2/` 子目录经 `git subtree split` 剥离而来，26 个提交历史连续（作者已统一重写为 gdtdpt）。文中提及的 `40afd24` 等提交号在剥离重写后已变化（旧号仅作历史索引）；提及 `v2/...` 的路径一律对应本仓库根。
 
-状态：**2.0.0 正式版已构建，双屏真机验证通过（2026-11-17），待用户确认发布**。多屏呼出定位链（rc4–rc10 反复返工）已收敛：跟随鼠标所在屏 + 物理像素逐屏 DPI + 每屏独立位置记忆（键=设备名@整屏物理尺寸）+ 跨屏 DPI 尺寸重排钉回；rc1–rc10 全部作废，正式号 2.0.0 对应 rc10 内容（AssemblyInfo 曾漏进位 rc9/rc10，正式版一并修正）。历史待验收提交：var 截断气泡（`f65b396`）、多行编辑区滚动条贴底 + encode/regex 自动换行（`d4a03a3`）、暗色+简洁模式整窗发白修复（`f81d005`）、呼出窗跟随鼠标所在屏（`addf62a`，混合 DPI 物理像素返工 + 旧偏移/旧坐标作废见下）、带参 lnk 启动报 193 修复（2026-11-09 真机踩到：Chrome 开始菜单快捷方式自带 `--source-shortcut-location=start-menu`，CreateProcess 直接对 .lnk 报 ERROR_BAD_EXE_FORMAT；修复为带参分支 spawn 解析后的 TargetPath + 存在性检查按真实目标判定 + SaveSummonOffset 补落盘，selftest 101 项全过，Chrome 条目探针实测启动成功）；tools 工具列表 + 内置工具图标已验收（剥离前提交 `40afd24`，selftest 96 项全过；含验收反馈修复：列表行图标-文字间距）；明暗主题已验收提交（`fab53a0`，2026-11-05，selftest 94 项全过）；code-naming 已验收提交（`3f5483e`，2026-11-05，M4 AI 批第四消费者收官，selftest 93 项全过）；ai-translate 已验收提交（`f08fb91`，2026-11-05，M4 AI 批第三个消费者，selftest 90 项全过）；剪贴板文件条目打磨 + 写回重试 + 滚动复位已验收提交（`e776f9f`，selftest 88）；ai-ocr 已验收提交（`46cf1ff`，M4 AI 批第二个消费者，selftest 87）；regex AI 生成 POC 已验收提交（`dfc3b9d`）；diff F3 备用键 N/P 已验收（`31794b4`）；diff 行号列水平固定已验收（`6f4cb64`）；text-diff 已验收提交（2026-11-04）；regex-tool / S10 自启清理已提交（2026-11-04）；此前 UI 控件规范化（`155e9a9`）/ cron（`e1e1ea7`）/ encoding-converter（`6af788d`）/ format 间距（`4ca3c72`）/ 剪贴板 alpha（`05daf1d`）已验收提交；dev-values 用户暂缓，env-switcher 归 M5；另有待排期需求「diff 历史记录」（见下）
-更新时间：2026-11-17
+状态：**2.0.1 构建，待真机验收（2026-11-18）**：搜索/过滤输入框的覆盖式 placeholder 与自动聚焦的光标重叠（光标压在占位首字上）。方案：placeholder 保持「非空即隐藏」不变，**起点右移至光标之后**——光标占 2px 物理宽、中文字形墨迹向左越出排版原点约 1px，故占位起点 = 光标排版原点 + 3 DIP，实际可见间隙 ≈3px（200% 屏）/ ≈1.5px（100% 屏）。四处统一：ActionPanel（margin 13）、SummonView「搜索应用…/过滤工具…」（margin 3）、ClipboardView、VscProjectView；SettingsWindow 热键框只读态不显示光标，不涉及。注意 placeholder Margin 的基准是 **Grid 原点**：SummonView 的 Grid 在 Border Padding（SearchPadding 14）之内，动作面板 Grid 无此 padding、其 TextBox 自带 Margin 2 + Padding 8，两处光标原点不同。2.0.0 已于 2026-11-17 正式发布（GitHub Release v2.0.0，双屏真机验证通过），历史待验收提交：var 截断气泡（`f65b396`）
+更新时间：2026-11-18
 
 ## 呼出窗跟随鼠标所在屏（2026-11-09 定案，11-10 物理像素，11-13 每屏独立记忆 + DPI 尺寸钉回，11-17 双屏真机验证通过）
 

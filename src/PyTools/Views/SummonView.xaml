@@ -37,10 +37,10 @@
                              BorderThickness="0"
                              Padding="0"
                              VerticalContentAlignment="Center"/>
-                    <!-- 占位提示：输入非空即隐藏（主搜索框只属于主查询，动作过滤在面板内独立输入框） -->
+                    <!-- 占位提示：非空即隐藏；起点=Grid原点+3（光标占2px+字侧bearing 1px，实际间隙≈3px） -->
                     <TextBlock x:Name="PART_Placeholder"
                                Text="搜索应用…"
-                               Margin="2,0,0,0"
+                               Margin="3,0,0,0"
                                VerticalAlignment="Center"
                                IsHitTestVisible="False"
                                Foreground="{DynamicResource Text.Placeholder}"

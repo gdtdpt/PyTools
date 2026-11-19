@@ -38,7 +38,7 @@
                              VerticalContentAlignment="Center"/>
                     <TextBlock x:Name="PART_Placeholder"
                                Text="搜索 VSCode 项目…"
-                               Margin="2,0,0,0"
+                               Margin="3,0,0,0"
                                VerticalAlignment="Center"
                                IsHitTestVisible="False"
                                Foreground="{DynamicResource Text.Placeholder}"

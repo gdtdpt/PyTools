@@ -97,8 +97,12 @@
                         Background="{DynamicResource Bg.ItemHover}"
                         CornerRadius="{DynamicResource Radius.Control}">
                     <Grid>
+                        <!-- 占位提示：非空即隐藏；起点=光标右缘+3px。
+                             ⚠ 模板把 Padding 写进 ScrollViewer.Margin，TextBoxView 自身又应用一次
+                             Padding → 光标/文字实际落在 Margin + 2×Padding。水平间距必须走 Margin、
+                             Padding 水平位保持 0，否则光标穿进首字（margin 13 仍压字的根因）。 -->
                         <TextBlock Text="搜索操作…"
-                                   Margin="10,0,0,0"
+                                   Margin="13,0,0,0"
                                    VerticalAlignment="Center"
                                    IsHitTestVisible="False"
                                    Foreground="{DynamicResource Text.Placeholder}"
@@ -108,8 +112,8 @@
                                  Height="26"
                                  Background="Transparent"
                                  BorderThickness="0"
-                                 Padding="8,3"
-                                 Margin="2,0"
+                                 Padding="0,3"
+                                 Margin="10,0"
                                  VerticalContentAlignment="Center"
                                  FontSize="{DynamicResource Font.Secondary}"
                                  Foreground="{DynamicResource Text.Primary}"

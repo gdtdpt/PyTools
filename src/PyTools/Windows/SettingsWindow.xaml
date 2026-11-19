@@ -203,7 +203,7 @@
                                        Foreground="{DynamicResource Text.Secondary}"/>
                             <Grid Grid.Column="1">
                                 <TextBox x:Name="ClipHotkeyBox"
-                                         Height="28" Padding="6,0"
+                                         Height="28" Padding="3,0"
                                          VerticalContentAlignment="Center"
                                          IsReadOnly="True" IsReadOnlyCaretVisible="False"
                                          Cursor="Hand"
@@ -215,9 +215,10 @@
                                          Foreground="{DynamicResource Text.Primary}"
                                          CaretBrush="{DynamicResource Text.Primary}"
                                          ToolTip="点击后按下组合键；Win 组合请用右侧「Win+V」；Esc 取消"/>
-                                <!-- 空值占位：叠加层，不新增行、不改变布局 -->
+                                <!-- 空值占位：叠加层，不新增行、不改变布局（热键框只读态不显示光标，无压字问题）；
+                                     对齐 6 DIP=模板 Padding 双重应用后的文字实际起点（Margin0+2×Padding3） -->
                                 <TextBlock Text="未设置"
-                                           Margin="8,0,0,0"
+                                           Margin="6,0,0,0"
                                            VerticalAlignment="Center"
                                            IsHitTestVisible="False"
                                            FontSize="12"
