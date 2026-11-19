@@ -2,8 +2,49 @@
 
 > **仓库剥离说明（2026-11-06）**：本仓库由旧仓库 `pytools` 的 `v2/` 子目录经 `git subtree split` 剥离而来，26 个提交历史连续（作者已统一重写为 gdtdpt）。文中提及的 `40afd24` 等提交号在剥离重写后已变化（旧号仅作历史索引）；提及 `v2/...` 的路径一律对应本仓库根。
 
-状态：**2.0.1 构建，待真机验收（2026-11-19）**：搜索/过滤输入框的覆盖式 placeholder 与自动聚焦的光标重叠（光标压在占位首字上）。两个根因：① placeholder Margin 基准是 **Grid 原点**（SummonView 的 Grid 在 Border SearchPadding 14 之内、动作面板 Grid 无此 padding），起点按光标排版原点右移 3 DIP——SummonView margin 3、ActionPanel margin 13；② **Controls.xaml 隐式 TextBox 模板把 Padding 写进 ScrollViewer.Margin，TextBoxView 自身又应用一次 Padding → 光标/文字实际落在 Margin + 2×Padding**，凡 Padding 水平位非 0 的框光标都会偏右穿进首字（动作面板实测光标在 Margin2+2×Padding8=18 DIP 而非声明的 10）。修法：**带占位框的水平间距一律走 Margin、Padding 水平位置 0**——ActionPanel TextBox 改 Margin="10,0" + Padding="0,3"（光标/占位/输入三者对齐 10 DIP，探针实测光标 10.0 DIP、墨迹 12.0 DIP、间隙 2px 与主搜索一致）；SettingsWindow 热键框同步 Padding="3,0"（文字实际起点 6 DIP）、占位 margin 6。 SummonView/ClipboardView/VscProjectView 的搜索框 Padding=0 不受 ② 影响。**约定：新增带 placeholder 的输入框时，若隐式模板生效，水平内边距用 TextBox.Margin 表达，不用 Padding。** 2.0.0 已于 2026-11-17 正式发布（GitHub Release v2.0.0，双屏真机验证通过），历史待验收提交：var 截断气泡（`f65b396`）
-更新时间：2026-11-18
+状态：**2.1.0 待发布（2026-11-19）**——网页搜索功能（别名前缀模式 + 列表末尾兜底条目 + URL 直开 + 设置页引擎管理），用户真机验收通过；已提交、本地 tag `v2.1.0`，**push tag 与建 Release 等用户确认**。上一任务：2.0.1 已发布（2026-11-19，placeholder 遮挡修复）。
+更新时间：2026-11-19
+
+## 网页搜索（2026-11-19 设计定稿，用户逐条确认）
+
+**两条触发路径共存，总开关 `v2.webSearchEnabled` 关闭时全部不显示不触发（默认关）：**
+
+1. **别名前缀模式（主力）**：输入「别名+空格」（完全匹配、不分大小写、须在输入框开头）→ 搜索框进入引擎 tag 态：ModeBadge 显示引擎名（照抄工具列表模式的模式徽章口径）、placeholder 换「谷歌搜索…」、**不出结果列表**，输入内容后 Enter = 开浏览器 + 收起呼出窗。退出：Esc（分层退出约定）+ 输入为空时 Backspace 退出（单次，用户已同意）。
+2. **列表末尾兜底条目**：正常输入时每个启用引擎各一条「用 Google 搜索「xxx」」排在末尾；应用结果为 0 时自动成为唯一条目且默认选中。不进动作面板（动作面板保持原样——每条应用都挂搜索动作会让提示条「操作」段常亮，且语义不搭）。
+
+**执行**：`Process.Start(url)` 走默认浏览器（已开的进程自动复用新标签页）；查询词 `Uri.EscapeDataString`；URL 模板非法时 toast「URL 模板无效」不收窗。
+
+**URL 直开条目（2026-11-19 定稿，不受开关控制、始终可用）**：查询词以 `http://`/`https://` 开头且能被 `Uri` 正确解析 → 列表**首位**出现「用浏览器打开 xxx」条目（`IsCommand`，不进动作面板）并默认选中，Enter/点击 = `Process.Start` 原样打开（不拼词）。判定范围收紧到 http/https 前缀（不做「像域名」模糊判定）；别名 tag 态下 Enter 仍走引擎搜索（tag 态语义优先，URL 直开仅在主搜索态）。
+
+**URL 模板两种形态**：带 `%s` = 替换编码后查询词；**不带 `%s` = 直接打开页面不拼词**（覆盖 DeepSeek/Gemini 等不支持 URL 带词的站点，及用户未来的 chat 场景）。站点带词能力（2026-11-19 查证，均为非官方前端行为）：ChatGPT/Claude/Perplexity/Grok/Copilot 支持 `?q=` 预填但**不自动发送**；DeepSeek/Gemini 不支持。
+
+**配置**（AppConfig，v2. 前缀）：`v2.webSearchEnabled`（bool，默认 false）、`v2.webSearchEngines`（数组 `{name, alias, url, enabled}`）、`v2.webSearchDefault`（默认引擎名）。预置引擎与别名（默认全关）：Google=`https://www.google.com/search?q=%s` 别名 `g`；百度=`https://www.baidu.com/s?wd=%s` 别名 `bd`；Bing=`https://www.bing.com/search?q=%s` 别名 `bi`（2026-11-19 用户指定）。别名必须唯一（保存校验）。
+
+**设置 UI**：「网页搜索」分组 = 总开关 + 引擎行列表（启用勾选/名称/别名/URL 模板/默认标记）+ 自定义新增。带 placeholder 的输入框水平内边距走 Margin（2026-11-18 约定）。
+
+**设置 UI 返工（2026-11-19 用户截图反馈，dev2）**：
+- **行错位根因**：`ListBoxItem` 默认 `HorizontalContentAlignment=Left`，行 Grid 收缩到内容宽度，搜索地址列的 `*` 失效——三行 URL 框宽度随内容长短不一。修法：`ItemContainerStyle` 设 `HorizontalContentAlignment=Stretch`（+Padding=0）。**凡 ListBox 行内用 `*` 列占满，必须显式 Stretch 容器**。
+- 新增引擎改为**空行 + placeholder 引导**（不预填「新引擎/example.com」）：占位文案经 `WebBoxPlaceholder.Text` 附加属性传入、`WebEngineBox` 模板内 TextBlock（Trigger Text="" 显示）承载；列头曾加过一版被用户否掉（「表头太难看」），最终无表头，列语义靠 placeholder + ToolTip。
+- 校验放宽：空行允许保持空名称/空地址不报错；名称/地址**均未填**的行不参与别名触发与兜底条目（WebSearch 层双防护，selftest +1 = 111）。
+- 删除引擎加 MessageBox 确认；第一个填好名字的引擎自动成为默认（`WebSearchDefault` 为空时）。
+- **web-open 前台修复（2026-11-19 用户反馈「浏览器打开后自动切回原前台」）**：web-open 分支原先走 `HideSummon()`（默认恢复呼出前前台），收窗后 `Foreground.Restore` 把原窗口顶回、浏览器被压后台。修法：web-open 成功后 `HideSummon(restoreFocus: false)` 跳过前台恢复，让浏览器自然持有前台。**普通应用启动不受影响**（AppLauncher 路径仍恢复前台—— exe 自身会抢前台，与 v1 行为一致）。
+
+**实现落点（2026-11-19）**：
+
+- `Core/WebSearch.cs`（新增）：`WebSearchEngine`（name/alias/url/enabled）+ `Defaults()`（g=Google、bd=百度、bi=Bing，Bing 默认停用）+ `ParseList/ToRaw`（JavaScriptSerializer 的 JSON 数组是 `ArrayList`，逐项转 `Dictionary<string,object>`）+ `TryMatchAlias`（开头 + 空格 + 不区分大小写 + 最长别名优先）+ `TryBuildUrl`（`%s` 替换 + `IsUrl` 校验，无 `%s` 原样）+ `IsUrl`（仅 http/https、拒绝含空格）+ `Open`（`Process.Start`）+ `BuildUrlEntry/BuildFallbackEntries`（生成 `CommandId="web-open"` 的内置条目，URL 放新增的 `AppEntry.CommandArg`）。
+- `Core/AppEntry.cs`：新增 `CommandArg`（内置命令参数，普通条目恒空）。
+- `Core/AppConfig.cs`：三键读写 + `SaveWebSearch()`；**引擎表键存在即照实读（删空即空表），键缺失才回预置**——否则用户删空会被预置顶回来。
+- `Views/SummonView`：`Config` 注入；`OnSearchTextChanged` 先试别名（`_suppressAliasTrigger` 防自触发）；`EnterSearchMode/ExitSearchModeInternal/TryExitSearchMode/ExecuteSearchFromTag`；`RefreshResults` 顺序 = URL 直开 → 内置命令 → 应用 → 引擎兜底；`UpdateHintBar` 前缀态分支（徽章 = 引擎名、左侧文案改「搜索」）；键位 = Enter 搜索、空输入 Backspace 退出。XAML 给徽章文字与「打开」文案加 `x:Name`。
+- `App.xaml.cs`：`_view.Config = _config`；Esc 分层退出加 `TryExitSearchMode()`；`OnLaunchRequested` 增 `web-open` 分支（`Logger.Info("web-open " + url)` → `WebSearch.Open` → 成功 `HideSummon`，失败 toast）。
+- `Windows/SettingsWindow`：新增「搜索」导航页（开关 + 引擎行内编辑：名称/别名/地址失焦提交、启用勾选、默认单选、删除、新增；非法值回滚 + 提示；别名唯一性与空格校验）。
+- `Themes/Icons.xaml`：`Icon.WebSearch`（放大镜）、`Icon.OpenUrl`（地球）。
+- `SelfTest`：+6 项（预置/别名匹配/URL 拼接/URL 判定/兜底条目/配置往返），累计 **110 全过**。
+
+**踩坑记录（自验阶段）**：
+- 前缀态下若有 `␣`(U+2423) 之类的符号，中文字体渲染成下划线/方框 → 文案一律用「别名 + 空格」的文字表述。
+- 进入前缀态会收起列表并重建 `ItemsSource`，启动路径下键盘焦点可能不落在输入框：`EnterSearchMode` 末尾用 50ms 定时器重试 `SearchBox.Focus()` 直到 `IsKeyboardFocused`（`Logger.Debug("search mode focus retry…")` 可诊断）。
+- 探针注入按键时**首个按键会被窗口激活过程吞掉**（`keybd_event` 单键测试会误判为「功能没生效」）——先发一个修饰键吃掉激活，再发真实按键。
+- 单实例锁被占用时（本机只跑着 v1 也会出现 `Local\PyTools.V2.SingleInstance` 已存在），按既有做法临时改 `.Probe` 锁名重建自验，**验完必须还原并重建**。
 
 ## 呼出窗跟随鼠标所在屏（2026-11-09 定案，11-10 物理像素，11-13 每屏独立记忆 + DPI 尺寸钉回，11-17 双屏真机验证通过）
 
