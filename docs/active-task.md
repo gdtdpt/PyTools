@@ -2,7 +2,7 @@
 
 > **仓库剥离说明（2026-11-06）**：本仓库由旧仓库 `pytools` 的 `v2/` 子目录经 `git subtree split` 剥离而来，26 个提交历史连续（作者已统一重写为 gdtdpt）。文中提及的 `40afd24` 等提交号在剥离重写后已变化（旧号仅作历史索引）；提及 `v2/...` 的路径一律对应本仓库根。
 
-状态：**2.0.1 构建，待真机验收（2026-11-18）**：搜索/过滤输入框的覆盖式 placeholder 与自动聚焦的光标重叠（光标压在占位首字上）。方案：placeholder 保持「非空即隐藏」不变，**起点右移至光标之后**——光标占 2px 物理宽、中文字形墨迹向左越出排版原点约 1px，故占位起点 = 光标排版原点 + 3 DIP，实际可见间隙 ≈3px（200% 屏）/ ≈1.5px（100% 屏）。四处统一：ActionPanel（margin 13）、SummonView「搜索应用…/过滤工具…」（margin 3）、ClipboardView、VscProjectView；SettingsWindow 热键框只读态不显示光标，不涉及。注意 placeholder Margin 的基准是 **Grid 原点**：SummonView 的 Grid 在 Border Padding（SearchPadding 14）之内，动作面板 Grid 无此 padding、其 TextBox 自带 Margin 2 + Padding 8，两处光标原点不同。2.0.0 已于 2026-11-17 正式发布（GitHub Release v2.0.0，双屏真机验证通过），历史待验收提交：var 截断气泡（`f65b396`）
+状态：**2.0.1 构建，待真机验收（2026-11-19）**：搜索/过滤输入框的覆盖式 placeholder 与自动聚焦的光标重叠（光标压在占位首字上）。两个根因：① placeholder Margin 基准是 **Grid 原点**（SummonView 的 Grid 在 Border SearchPadding 14 之内、动作面板 Grid 无此 padding），起点按光标排版原点右移 3 DIP——SummonView margin 3、ActionPanel margin 13；② **Controls.xaml 隐式 TextBox 模板把 Padding 写进 ScrollViewer.Margin，TextBoxView 自身又应用一次 Padding → 光标/文字实际落在 Margin + 2×Padding**，凡 Padding 水平位非 0 的框光标都会偏右穿进首字（动作面板实测光标在 Margin2+2×Padding8=18 DIP 而非声明的 10）。修法：**带占位框的水平间距一律走 Margin、Padding 水平位置 0**——ActionPanel TextBox 改 Margin="10,0" + Padding="0,3"（光标/占位/输入三者对齐 10 DIP，探针实测光标 10.0 DIP、墨迹 12.0 DIP、间隙 2px 与主搜索一致）；SettingsWindow 热键框同步 Padding="3,0"（文字实际起点 6 DIP）、占位 margin 6。 SummonView/ClipboardView/VscProjectView 的搜索框 Padding=0 不受 ② 影响。**约定：新增带 placeholder 的输入框时，若隐式模板生效，水平内边距用 TextBox.Margin 表达，不用 Padding。** 2.0.0 已于 2026-11-17 正式发布（GitHub Release v2.0.0，双屏真机验证通过），历史待验收提交：var 截断气泡（`f65b396`）
 更新时间：2026-11-18
 
 ## 呼出窗跟随鼠标所在屏（2026-11-09 定案，11-10 物理像素，11-13 每屏独立记忆 + DPI 尺寸钉回，11-17 双屏真机验证通过）
