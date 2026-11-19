@@ -176,11 +176,11 @@
                                 CornerRadius="3"
                                 Padding="6,1"
                                 Visibility="Collapsed">
-                            <TextBlock Text="工具列表"
+                            <TextBlock x:Name="ModeBadgeText" Text="工具列表"
                                        Foreground="{DynamicResource Accent}"
                                        FontSize="{DynamicResource Font.Secondary}"/>
                         </Border>
-                        <TextBlock Text="打开"
+                        <TextBlock x:Name="HintOpenText" Text="打开"
                                    VerticalAlignment="Center"
                                    Foreground="{DynamicResource Text.Secondary}"
                                    FontSize="{DynamicResource Font.Secondary}"/>

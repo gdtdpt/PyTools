@@ -10,6 +10,16 @@ using PyTools.Native;
 
 namespace PyTools.Windows
 {
+    /// <summary>引擎行输入框的占位文案载体（WebEngineBox 模板经 TemplateBinding 读取）。</summary>
+    public static class WebBoxPlaceholder
+    {
+        public static string GetText(DependencyObject obj) { return obj.GetValue(TextProperty) as string ?? ""; }
+        public static void SetText(DependencyObject obj, string value) { obj.SetValue(TextProperty, value); }
+        public static readonly DependencyProperty TextProperty =
+            DependencyProperty.RegisterAttached("Text", typeof(string), typeof(WebBoxPlaceholder),
+                new FrameworkPropertyMetadata(""));
+    }
+
     /// <summary>
     /// 设置窗口（M2b，L10+S10）。复用令牌层；开关点击即生效（注册表类动作回读实况，
     /// 失败回滚勾选态并提示——意图与实况分离，Mino 教训）。
@@ -25,6 +35,7 @@ namespace PyTools.Windows
         private bool _loaded;          // Loaded 之前不响应控件事件
         private TextBox _captureBox;   // 正在捕获的输入框（null = 未在捕获）
         private TextBlock _captureHint;
+        private bool _webEnginePopulating; // 重建引擎行期间抑制复选框/单选事件
 
         // AI 模型分组：后台拉取期间的填充抑制 + 当前选中（回滚基准）+ 拉取序号（刷新竞态）
         private bool _aiPopulating;
@@ -58,6 +69,7 @@ namespace PyTools.Windows
         private void ShowPage(string tag)
         {
             PageGeneral.Visibility = tag == "general" ? Visibility.Visible : Visibility.Collapsed;
+            PageWebSearch.Visibility = tag == "websearch" ? Visibility.Visible : Visibility.Collapsed;
             PageClipboard.Visibility = tag == "clipboard" ? Visibility.Visible : Visibility.Collapsed;
             PageContextMenu.Visibility = tag == "contextmenu" ? Visibility.Visible : Visibility.Collapsed;
             PageAi.Visibility = tag == "ai" ? Visibility.Visible : Visibility.Collapsed;
@@ -90,6 +102,7 @@ namespace PyTools.Windows
             SetHint(ContextMenuHint, "更改即时写入注册表，点击即生效");
             RefreshClipboardSection();
             RefreshCustomList();
+            RefreshWebEngines();
             _loaded = true;
             RefreshAiModels(); // 必须在 _loaded 之后：其入口有 !_loaded 守卫
             // XAML 里 IsChecked="True" 的 Checked 事件早于其他页字段创建，被 OnNavChanged 守卫丢弃：
@@ -558,6 +571,189 @@ namespace PyTools.Windows
             }
             _aiCurrentModel = model;
             SetHint(AiHint, "已切换模型: " + model + "（下次生成即使用）");
+        }
+
+        // ---- 网页搜索（2026-11-19）：开关 + 引擎表（行内编辑即改即存）----
+
+        private const string WebSearchIdleHint =
+            "别名规则：主搜索框输入「别名 + 空格」（如 g 后按空格，再输关键词）回车即用该引擎搜索；列表末尾也会出现兜底条目。"
+            + "地址里的 %s 会替换为搜索词，不含 %s 则直接打开该页面（适合 DeepSeek 等不支持 URL 带词的站点）。"
+            + "另外，输入以 http(s):// 开头的网址可直接回车用浏览器打开，该功能不受本开关控制。";
+
+        /// <summary>引擎行视图模型：单向读引擎字段，改动由事件处理器显式写回（无 INPC 依赖）。</summary>
+        public sealed class WebEngineRow
+        {
+            public WebSearchEngine Engine;
+            public bool IsDefault;
+            public string Name { get { return Engine.Name; } }
+            public string Alias { get { return Engine.Alias; } }
+            public string Url { get { return Engine.Url; } }
+            public bool Enabled { get { return Engine.Enabled; } }
+        }
+
+        private void RefreshWebEngines()
+        {
+            _webEnginePopulating = true;
+            try
+            {
+                var rows = new List<WebEngineRow>();
+                foreach (var engine in _config.WebSearchEngines)
+                {
+                    rows.Add(new WebEngineRow
+                    {
+                        Engine = engine,
+                        IsDefault = string.Equals(engine.Name, _config.WebSearchDefault, StringComparison.OrdinalIgnoreCase)
+                    });
+                }
+                WebEngineList.ItemsSource = null;
+                WebEngineList.ItemsSource = rows;
+                WebSearchEnabledCheck.IsChecked = _config.WebSearchEnabled;
+            }
+            finally { _webEnginePopulating = false; }
+            SetHint(WebSearchHint, WebSearchIdleHint);
+            SetHint(WebEngineHint, _config.WebSearchEngines.Count == 0
+                ? "尚未配置引擎（可点「新增引擎」）"
+                : "共 " + _config.WebSearchEngines.Count + " 个引擎，修改即时保存");
+        }
+
+        private void OnWebSearchEnabledChanged(object sender, RoutedEventArgs e)
+        {
+            if (!_loaded || _webEnginePopulating) return;
+            var enable = WebSearchEnabledCheck.IsChecked == true;
+            _config.WebSearchEnabled = enable;
+            _config.SaveWebSearch();
+            SetHint(WebSearchHint, enable
+                ? "已启用：输入「g 空格 关键词」回车即搜；列表末尾也会出现兜底条目"
+                : "已关闭：别名与兜底条目都不再出现（URL 直开仍可用）");
+        }
+
+        private void OnWebEngineEnabledChanged(object sender, RoutedEventArgs e)
+        {
+            if (!_loaded || _webEnginePopulating) return;
+            var box = sender as CheckBox;
+            var row = box != null ? box.DataContext as WebEngineRow : null;
+            if (row == null) return;
+            row.Engine.Enabled = box.IsChecked == true;
+            _config.SaveWebSearch();
+            SetHint(WebEngineHint, (row.Engine.Enabled ? "已启用：" : "已停用：") + row.Engine.Name);
+        }
+
+        private void OnWebEngineDefaultChecked(object sender, RoutedEventArgs e)
+        {
+            if (!_loaded || _webEnginePopulating) return;
+            var radio = sender as RadioButton;
+            var row = radio != null ? radio.DataContext as WebEngineRow : null;
+            if (row == null || row.IsDefault) return;
+            _config.WebSearchDefault = row.Engine.Name;
+            _config.SaveWebSearch();
+            RefreshWebEngines();
+            SetHint(WebEngineHint, "默认引擎：" + row.Engine.Name + "（兜底条目里排首位）");
+        }
+
+        /// <summary>名称 / 别名 / 地址失焦提交：非法值回滚到旧值并说明原因（意图 ≠ 实况）。</summary>
+        private void OnWebEngineFieldCommitted(object sender, RoutedEventArgs e)
+        {
+            if (!_loaded) return;
+            var box = sender as TextBox;
+            var row = box != null ? box.DataContext as WebEngineRow : null;
+            if (row == null) return;
+            var tag = box.Tag as string ?? "";
+            var value = (box.Text ?? "").Trim();
+
+            if (tag == "name")
+            {
+                // 新增空行允许保持为空（等待填写），不报错不保存
+                if (value.Length == 0 && row.Name.Length == 0) return;
+                if (value.Length == 0) { box.Text = row.Name; SetHint(WebEngineHint, "名称不能为空"); return; }
+                if (value == row.Name) { box.Text = value; return; }
+                foreach (var other in _config.WebSearchEngines)
+                {
+                    if (ReferenceEquals(other, row.Engine)) continue;
+                    if (string.Equals(other.Name, value, StringComparison.OrdinalIgnoreCase))
+                    {
+                        box.Text = row.Name;
+                        SetHint(WebEngineHint, "名称已存在：" + value);
+                        return;
+                    }
+                }
+                var oldName = row.Engine.Name;
+                row.Engine.Name = value;
+                if (string.Equals(_config.WebSearchDefault, oldName, StringComparison.OrdinalIgnoreCase))
+                    _config.WebSearchDefault = value;
+                else if (_config.WebSearchDefault.Length == 0)
+                    _config.WebSearchDefault = value; // 第一个填好名字的引擎自动成为默认（兜底条目需要默认引擎）
+                _config.SaveWebSearch();
+                SetHint(WebEngineHint, "名称已更新：" + value);
+                return;
+            }
+            if (tag == "alias")
+            {
+                if (!WebSearch.IsAliasValid(value))
+                {
+                    box.Text = row.Alias;
+                    SetHint(WebEngineHint, "别名不能包含空格（空格是触发分隔符）");
+                    return;
+                }
+                var conflict = WebSearch.AliasConflict(value, row.Engine, _config.WebSearchEngines);
+                if (conflict != null)
+                {
+                    box.Text = row.Alias;
+                    SetHint(WebEngineHint, "别名已被「" + conflict + "」占用");
+                    return;
+                }
+                if (value == row.Alias) return;
+                row.Engine.Alias = value;
+                _config.SaveWebSearch();
+                SetHint(WebEngineHint, value.Length == 0 ? "已清除别名" : "别名已设为 " + value + "（输入后加空格进入搜索态）");
+                return;
+            }
+            if (tag == "url")
+            {
+                if (value.Length == 0 && row.Url.Length == 0) return; // 新增空行：等待填写
+                if (value.Length == 0) { box.Text = row.Url; SetHint(WebEngineHint, "搜索地址不能为空"); return; }
+                // %s 换成样例词再校验，避免把占位符当成非法 URL
+                if (!WebSearch.IsUrl(value.Replace(WebSearch.Placeholder, "test")))
+                {
+                    box.Text = row.Url;
+                    SetHint(WebEngineHint, "地址必须是完整的 http/https 链接");
+                    return;
+                }
+                if (value == row.Url) return;
+                row.Engine.Url = value;
+                _config.SaveWebSearch();
+                SetHint(WebEngineHint, "搜索地址已更新");
+            }
+        }
+
+        private void OnWebEngineDelete(object sender, RoutedEventArgs e)
+        {
+            if (!_loaded) return;
+            var button = sender as Button;
+            var row = button != null ? button.DataContext as WebEngineRow : null;
+            if (row == null) return;
+            var name = row.Engine.Name;
+            var confirm = MessageBox.Show(this,
+                string.IsNullOrEmpty(name) ? "确定删除这个未填写的引擎行？" : "确定删除引擎「" + name + "」？",
+                "删除引擎", MessageBoxButton.YesNo, MessageBoxImage.Question);
+            if (confirm != MessageBoxResult.Yes) return;
+            _config.WebSearchEngines.Remove(row.Engine);
+            if (string.Equals(_config.WebSearchDefault, name, StringComparison.OrdinalIgnoreCase))
+                _config.WebSearchDefault = _config.WebSearchEngines.Count > 0 ? _config.WebSearchEngines[0].Name : "";
+            _config.SaveWebSearch();
+            RefreshWebEngines();
+            SetHint(WebEngineHint, "已删除：" + name);
+        }
+
+        private void OnWebEngineAdd(object sender, RoutedEventArgs e)
+        {
+            if (!_loaded) return;
+            // 新增空行（2026-11-19 用户反馈）：不预填任何内容，placeholder 引导填写；
+            // 未填完（名称或地址为空）的行不会出现在搜索结果（WebSearch 层按名称/地址有效性过滤）
+            var added = new WebSearchEngine { Name = "", Alias = "", Url = "", Enabled = true };
+            _config.WebSearchEngines.Add(added);
+            _config.SaveWebSearch();
+            RefreshWebEngines();
+            SetHint(WebEngineHint, "已新增引擎行：请填写名称与搜索地址（填写后即时保存，别名可留空）");
         }
 
         private void OnClose(object sender, RoutedEventArgs e) { Close(); }

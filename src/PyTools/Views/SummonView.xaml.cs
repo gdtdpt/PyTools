@@ -76,6 +76,9 @@ namespace PyTools.Views
         private bool _actionMode;      // Ctrl+Enter 动作面板：独立浮层 + 自带过滤输入框
         private AppEntry _actionTarget; // 操作模式的目标条目
         private bool _toolListMode;    // 工具列表模式（tools 条目回车进入）：列表只展示内置工具
+        private bool _searchMode;      // 引擎别名前缀态（2026-11-19）：输入「别名+空格」进入，不出列表
+        private WebSearchEngine _searchEngine;
+        private bool _suppressAliasTrigger; // 进入/退出前缀态时改文本不得再次触发别名解析
 
         public SummonView()
         {
@@ -84,7 +87,7 @@ namespace PyTools.Views
             _toastTimer.Tick += delegate { Toast.Visibility = Visibility.Collapsed; _toastTimer.Stop(); };
             PART_List.AddHandler(ScrollViewer.ScrollChangedEvent, new ScrollChangedEventHandler(OnListScrollChanged));
             PART_List.PreviewMouseLeftButtonUp += OnListClick;
-            SearchBox.TextChanged += delegate { RefreshResults(); };
+            SearchBox.TextChanged += delegate { OnSearchTextChanged(); };
             Actions.Invoked += OnActionInvoked;            // 面板选中执行 → 交给 App 层
             Actions.Dismissed += ExitActionModeInternal;    // Esc/Tab 收起 → 退出动作态
             PreviewKeyDown += OnViewPreviewKeyDown;
@@ -97,6 +100,9 @@ namespace PyTools.Views
 
         /// <summary>Ctrl+N/P 步进条数（v2.pageStep）。</summary>
         public int PageStep { get; set; }
+
+        /// <summary>配置（网页搜索开关与引擎表；App 注入，切实时读，设置改动即时生效）。</summary>
+        public AppConfig Config { get; set; }
 
         public event Action<AppEntry> LaunchRequested;
 
@@ -118,6 +124,7 @@ namespace PyTools.Views
             Toast.Visibility = Visibility.Collapsed;
             ExitActionModeInternal();
             ExitToolListModeInternal();
+            ExitSearchModeInternal(false);
             SearchBox.Text = "";
             SetListVisible(false);
         }
@@ -143,6 +150,7 @@ namespace PyTools.Views
         /// <summary>进入工具列表模式：清空查询、列表展示全部工具、placeholder 与提示条换口径。</summary>
         public void EnterToolListMode()
         {
+            ExitSearchModeInternal(false); // 与引擎前缀态互斥
             _toolListMode = true;
             SearchBox.Text = "";
             PART_Placeholder.Text = "过滤工具…";
@@ -189,6 +197,116 @@ namespace PyTools.Views
             SetListVisible(true);
         }
 
+        // ---- 引擎别名前缀态（2026-11-19）：输入「别名 + 空格」进入，回车直接开浏览器 ----
+
+        /// <summary>输入变化统一入口：先试别名前缀，再走普通搜索/工具列表。</summary>
+        private void OnSearchTextChanged()
+        {
+            if (!_suppressAliasTrigger && !_searchMode && !_toolListMode && !_actionMode
+                && Config != null && Config.WebSearchEnabled)
+            {
+                WebSearchEngine engine;
+                string rest;
+                if (WebSearch.TryMatchAlias(SearchBox.Text, Config.WebSearchEngines, out engine, out rest))
+                {
+                    EnterSearchMode(engine, rest);
+                    return;
+                }
+            }
+            RefreshResults();
+        }
+
+        /// <summary>进入引擎前缀态：搜索框只留查询词、徽章显示引擎名、不出结果列表。</summary>
+        private void EnterSearchMode(WebSearchEngine engine, string query)
+        {
+            if (engine == null) return;
+            ExitToolListModeInternal();
+            _searchMode = true;
+            _searchEngine = engine;
+            PART_Placeholder.Text = engine.Name + " 搜索…";
+            _suppressAliasTrigger = true;
+            try
+            {
+                SearchBox.Text = query ?? "";
+                SearchBox.CaretIndex = SearchBox.Text.Length;
+            }
+            finally { _suppressAliasTrigger = false; }
+            SetListVisible(false);
+            UpdateHintBar();
+            // 模式切换会重排内容（列表收起/重建 ItemsSource），焦点可能丢给窗口本身 → 显式收回输入框。
+            // 启动路径下窗口可能尚未完成激活，Focus() 拿不到键盘焦点 → 用短定时器补几拍。
+            EnsureSearchFocus(6);
+        }
+
+        /// <summary>把键盘焦点钉回主搜索框（前缀态专用）：失败则 50ms 后重试，最多 attempts 次。</summary>
+        private void EnsureSearchFocus(int attempts)
+        {
+            if (!_searchMode) return;
+            SearchBox.Focus();
+            SearchBox.CaretIndex = SearchBox.Text.Length;
+            if (SearchBox.IsKeyboardFocused) return;
+            Logger.Debug("search mode focus retry, attempts left=" + attempts);
+            if (attempts <= 0) return;
+            var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
+            timer.Tick += delegate
+            {
+                timer.Stop();
+                EnsureSearchFocus(attempts - 1);
+            };
+            timer.Start();
+        }
+
+        /// <summary>Esc 由 App 转问：前缀态退回普通搜索态（查询词留在框里，按普通搜索重刷）。返回是否已消费。</summary>
+        public bool TryExitSearchMode()
+        {
+            if (!_searchMode) return false;
+            ExitSearchModeInternal(true);
+            return true;
+        }
+
+        private void ExitSearchModeInternal(bool keepQuery)
+        {
+            if (!_searchMode) return;
+            _searchMode = false;
+            _searchEngine = null;
+            PART_Placeholder.Text = "搜索应用…";
+            ModeBadge.Visibility = Visibility.Collapsed;
+            HintOpenText.Text = "打开";
+            _suppressAliasTrigger = true;
+            try { if (!keepQuery) SearchBox.Text = ""; }
+            finally { _suppressAliasTrigger = false; }
+            if (keepQuery) RefreshResults();
+            else SetListVisible(false);
+        }
+
+        /// <summary>前缀态回车：拼 URL 交给 App 打开（web-open）；模板非法/查询为空只 toast 不收窗。</summary>
+        private void ExecuteSearchFromTag()
+        {
+            if (_searchEngine == null) return;
+            var query = SearchBox.Text.Trim();
+            var template = _searchEngine.Url ?? "";
+            if (query.Length == 0 && template.IndexOf(WebSearch.Placeholder, StringComparison.Ordinal) >= 0)
+            {
+                ShowToast("请输入搜索内容");
+                return;
+            }
+            string url, error;
+            if (!WebSearch.TryBuildUrl(_searchEngine, query, out url, out error))
+            {
+                ShowToast(error);
+                return;
+            }
+            var handler = LaunchRequested;
+            if (handler == null) return;
+            handler(new AppEntry
+            {
+                Name = _searchEngine.Name + " 搜索",
+                IsCommand = true,
+                CommandId = "web-open",
+                CommandArg = url
+            });
+        }
+
         private void ExitActionModeInternal()
         {
             if (!_actionMode) return;
@@ -222,6 +340,7 @@ namespace PyTools.Views
         {
             if (_actionMode) return; // 动作面板开启期间不重刷结果列表（面板内有独立过滤）
             if (_toolListMode) { RefreshToolList(); return; } // 工具列表模式：独立数据源与空态文案
+            if (_searchMode) { SetListVisible(false); return; } // 引擎前缀态：不出列表，提示条由 UpdateHintBar 接管
             var query = SearchBox.Text;
             var empty = string.IsNullOrWhiteSpace(query);
             if (empty)
@@ -233,17 +352,21 @@ namespace PyTools.Views
             var results = Index != null ? Index.Filter(query) : new List<AppEntry>();
             _generation++;
             _items.Clear();
-            foreach (var entry in results)
-            {
-                var vm = new ItemVM { Entry = entry };
-                _items.Add(vm);
-            }
-
+            // URL 直开（不受网页搜索开关控制，2026-11-19 定稿）：排首位并默认选中——
+            // 在应用启动器里输入完整 http(s) URL，意图几乎不可能是「拿这串字符搜应用」
+            if (WebSearch.IsUrl(query)) _items.Add(new ItemVM { Entry = WebSearch.BuildUrlEntry(query) });
             // 内置条目（M4 工具入口/快捷动作）排在应用之前：同词可命中多条（format 面板 + 格式化剪贴板动作），
-            // MatchAll 已按 rank+声明序排列（面板条目在前），逆序头插保持该顺序
-            var commands = BuiltinCommands.MatchAll(query);
-            for (var i = commands.Count - 1; i >= 0; i--)
-                _items.Insert(0, new ItemVM { Entry = commands[i] });
+            // MatchAll 已按 rank+声明序排列（面板条目在前），顺序保持
+            foreach (var command in BuiltinCommands.MatchAll(query))
+                _items.Add(new ItemVM { Entry = command });
+            foreach (var entry in results)
+                _items.Add(new ItemVM { Entry = entry });
+            // 引擎兜底条目排末尾（受总开关控制）：结果很多时排最后，快速路径走别名前缀态
+            if (Config != null && Config.WebSearchEnabled)
+            {
+                foreach (var entry in WebSearch.BuildFallbackEntries(Config.WebSearchEngines, Config.WebSearchDefault, query))
+                    _items.Add(new ItemVM { Entry = entry });
+            }
 
             PART_List.ItemsSource = null;
             PART_List.ItemsSource = _items;
@@ -292,10 +415,26 @@ namespace PyTools.Views
         /// （M4 工具可声明零动作 → 只显示「打开 ↵」）；动作面板打开期间整条隐藏避免重叠。</summary>
         private void UpdateHintBar()
         {
+            // 引擎前缀态：列表不可见但提示条要常显（徽章 = 引擎名，左侧动作文案 = 搜索）
+            if (_searchMode)
+            {
+                HintBar.Visibility = Visibility.Visible;
+                ModeBadge.Visibility = Visibility.Visible;
+                ModeBadgeText.Text = _searchEngine != null ? _searchEngine.Name + " 搜索" : "搜索";
+                HintOpenText.Text = "搜索";
+                ActionsHint.Visibility = Visibility.Collapsed;
+                return;
+            }
             var listVisible = !_actionMode && ListArea.Visibility == Visibility.Visible;
             HintBar.Visibility = listVisible ? Visibility.Visible : Visibility.Collapsed;
             if (!listVisible) return;
-            ModeBadge.Visibility = _toolListMode ? Visibility.Visible : Visibility.Collapsed;
+            if (_toolListMode)
+            {
+                ModeBadge.Visibility = Visibility.Visible;
+                ModeBadgeText.Text = "工具列表";
+            }
+            else ModeBadge.Visibility = Visibility.Collapsed;
+            HintOpenText.Text = "打开";
             var hasActions = false;
             var sel = SelectedIndex();
             if (sel >= 0 && sel < _items.Count) hasActions = AvailableActionCount(_items[sel].Entry) > 0;
@@ -377,6 +516,25 @@ namespace PyTools.Views
 
         private void OnViewPreviewKeyDown(object sender, KeyEventArgs e)
         {
+            // 引擎前缀态（2026-11-19）：回车 = 搜索；空输入按 Backspace = 退出（用户确认单次即退）。
+            // 其余按键（含数字、方向键、Ctrl+Enter）一律交给输入框——该态没有列表可操作。
+            if (_searchMode)
+            {
+                if (e.Key == Key.Back && SearchBox.Text.Length == 0)
+                {
+                    ExitSearchModeInternal(false);
+                    e.Handled = true;
+                    return;
+                }
+                if (e.Key == Key.Enter)
+                {
+                    ExecuteSearchFromTag();
+                    e.Handled = true;
+                    return;
+                }
+                return;
+            }
+
             // 动作面板态：键位策略集中在面板组件（聚焦在 Popup 内时面板自己也会收到同一份 HandleKey）
             if (_actionMode)
             {

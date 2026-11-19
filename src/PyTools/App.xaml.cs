@@ -170,6 +170,7 @@ namespace PyTools
                 _view = (SummonView)_window.Content;
                 _view.Index = _index;
                 _view.PageStep = _config.PageStep;
+                _view.Config = _config; // 网页搜索开关/引擎表：实时读，设置改动即时生效
                 _view.LaunchRequested += OnLaunchRequested;
                 _view.ActionRequested += OnActionRequested;
 
@@ -229,6 +230,7 @@ namespace PyTools
                     {
                         if (_view.TryExitActionMode()) return;
                         if (_view.TryExitToolListMode()) return; // 工具列表模式 → 普通搜索态（2026-11-06）
+                        if (_view.TryExitSearchMode()) return;   // 引擎前缀态 → 普通搜索态（2026-11-19）
                         HideSummon();
                         return;
                     }
@@ -1335,6 +1337,17 @@ namespace PyTools
             // 内置命令条目（M4 工具入口）：按 Kind 切视图或执行动作，不当作文件启动
             if (entry != null && entry.IsCommand)
             {
+                if (string.Equals(entry.CommandId, "web-open", StringComparison.OrdinalIgnoreCase))
+                {
+                    // 网页搜索 / URL 直开（2026-11-19）：URL 由 View 或 WebSearch 预先拼好放在 CommandArg
+                    Logger.Info("web-open " + entry.CommandArg);
+                    var webError = WebSearch.Open(entry.CommandArg);
+                    if (webError != null) { _view.ShowToast(webError); return; }
+                    // restoreFocus=false：不把呼出前的窗口抢回前台，否则刚启动/激活的浏览器
+                    // 会被压回后台（2026-11-19 用户反馈「浏览器打开后自动切回原前台」）
+                    HideSummon(restoreFocus: false);
+                    return;
+                }
                 if (string.Equals(entry.CommandId, "tools", StringComparison.OrdinalIgnoreCase))
                 {
                     _view.EnterToolListMode(); // 工具列表模式（2026-11-06，v1 tools 命令同款）

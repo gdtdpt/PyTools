@@ -20,6 +20,9 @@ namespace PyTools.Core
         public bool IsCommand;
         public string CommandId = "";
 
+        /// <summary>内置命令参数（如 web-open 要打开的 URL；普通条目恒为空）。</summary>
+        public string CommandArg = "";
+
         /// <summary>矢量图标资源键（Themes/Icons.xaml 的 Icon.<Id>；空 = 走列表行首字头像回退）。</summary>
         public string IconKey = "";
 

@@ -39,6 +39,12 @@ namespace PyTools.Core
         public string EncodeDirection = "encode";  // 编码转换记住上次方向（M4）
         public string Theme = "light";             // 主题：light / dark / system（启动读一次注册表，不实时监听，2026-11-05 拍板）
 
+        // 网页搜索（2026-11-19）：主搜索框的引擎别名前缀模式与列表末尾兜底条目都受 Enabled 管；
+        // URL 直开条目（http/https 输入）**不受**开关控制（用户指定）。
+        public bool WebSearchEnabled = false;
+        public List<WebSearchEngine> WebSearchEngines = WebSearch.Defaults();
+        public string WebSearchDefault = WebSearch.DefaultEngineName;
+
         private readonly string _path;
         private Dictionary<string, object> _raw = new Dictionary<string, object>();
         private readonly JavaScriptSerializer _serializer = new JavaScriptSerializer();
@@ -79,6 +85,14 @@ namespace PyTools.Core
             EncodeDirection = GetString("v2.encodeDirection", EncodeDirection);
             Theme = GetString("v2.theme", Theme);
             if (Theme != "dark" && Theme != "system") Theme = "light"; // 宽容：未知值回浅色
+            // 网页搜索：引擎表**键存在就照实读**（用户删空即空表），键缺失才回预置 —— 否则删空会被预置顶回来
+            WebSearchEnabled = GetBool("v2.webSearchEnabled", WebSearchEnabled);
+            object enginesNode;
+            if (_raw.TryGetValue("v2.webSearchEngines", out enginesNode))
+                WebSearchEngines = WebSearch.ParseList(enginesNode);
+            else
+                WebSearchEngines = WebSearch.Defaults();
+            WebSearchDefault = GetString("v2.webSearchDefault", WebSearchDefault);
             // 偏移只在语义版本匹配时信任（2026-11-12/13）：rc5 时代以错误坐标语义落盘的旧偏移、
             // 以及版本 2 的「全局单一偏移」都必须作废——无版本标记/版本不符一律按无记忆处理，
             // 下次呼出走默认位后重新落盘。
@@ -198,6 +212,19 @@ namespace PyTools.Core
             catch (Exception ex) { Logger.Error("save encode choice failed: " + ex.Message); }
         }
 
+        /// <summary>网页搜索配置写回（开关 / 引擎表 / 默认引擎，设置窗口改动后立即调用）。</summary>
+        public void SaveWebSearch()
+        {
+            try
+            {
+                _raw["v2.webSearchEnabled"] = WebSearchEnabled;
+                _raw["v2.webSearchEngines"] = WebSearch.ToRaw(WebSearchEngines);
+                _raw["v2.webSearchDefault"] = WebSearchDefault;
+                WriteBack();
+            }
+            catch (Exception ex) { Logger.Error("save web search failed: " + ex.Message); }
+        }
+
         /// <summary>把当前全部字段写回（设置窗口各项统一走这里，M2b）。</summary>
         public void Save()
         {
@@ -221,6 +248,9 @@ namespace PyTools.Core
             _raw["v2.encodeFormat"] = EncodeFormat;
             _raw["v2.encodeDirection"] = EncodeDirection;
             _raw["v2.theme"] = Theme;
+            _raw["v2.webSearchEnabled"] = WebSearchEnabled;
+            _raw["v2.webSearchEngines"] = WebSearch.ToRaw(WebSearchEngines);
+            _raw["v2.webSearchDefault"] = WebSearchDefault;
             // 每屏位置记忆：无记忆时不写键（键缺失 = 读回空字典）。旧版「全局单一偏移」的扁平键
             // 一律清除——留着只会让后续版本或 v1 读到一个语义已废的坐标。
             _raw.Remove("v2.summonOffsetX");

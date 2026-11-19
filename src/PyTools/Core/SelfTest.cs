@@ -1708,6 +1708,154 @@ namespace PyTools.Core
                 return null;
             }));
 
+            // ---- 网页搜索（2026-11-19）：别名前缀 / URL 拼接 / URL 直开 / 兜底条目 / 配置往返 ----
+
+            results.Add(Test("网页搜索：预置引擎与别名（g / bd / bi）+ URL 模板", () =>
+            {
+                var engines = WebSearch.Defaults();
+                if (engines.Count != 3) return "预置引擎数应为 3，实际 " + engines.Count;
+                if (engines[0].Alias != "g" || engines[1].Alias != "bd" || engines[2].Alias != "bi")
+                    return "预置别名不符: " + engines[0].Alias + "/" + engines[1].Alias + "/" + engines[2].Alias;
+                if (engines[0].Url.IndexOf(WebSearch.Placeholder, StringComparison.Ordinal) < 0) return "Google 模板缺 %s";
+                return null;
+            }));
+
+            results.Add(Test("网页搜索：别名前缀匹配（开头 + 空格 + 不分大小写 + 最长优先 + 禁用不触发）", () =>
+            {
+                var engines = WebSearch.Defaults();
+                WebSearchEngine engine; string query;
+                if (!WebSearch.TryMatchAlias("g cmd", engines, out engine, out query)) return "「g cmd」应命中";
+                if (engine.Name != "Google" || query != "cmd") return "命中结果不符: " + engine.Name + "/" + query;
+                if (!WebSearch.TryMatchAlias("G cmd", engines, out engine, out query) || engine.Name != "Google")
+                    return "别名应不分大小写";
+                if (!WebSearch.TryMatchAlias("bd ", engines, out engine, out query) || engine.Name != "百度" || query != "")
+                    return "「bd 」应命中且查询为空";
+                if (WebSearch.TryMatchAlias("google chrome安装", engines, out engine, out query))
+                    return "「google …」不应命中（g 后不是空格）";
+                if (WebSearch.TryMatchAlias("g", engines, out engine, out query)) return "「g」缺空格不应命中";
+                if (WebSearch.TryMatchAlias("gcmd", engines, out engine, out query)) return "「gcmd」不应命中";
+
+                var custom = new List<WebSearchEngine>
+                {
+                    new WebSearchEngine { Name = "G1", Alias = "g", Url = "https://a/?q=" + WebSearch.Placeholder },
+                    new WebSearchEngine { Name = "G2", Alias = "google", Url = "https://b/?q=" + WebSearch.Placeholder }
+                };
+                if (!WebSearch.TryMatchAlias("google x", custom, out engine, out query) || engine.Name != "G2" || query != "x")
+                    return "最长别名优先失效";
+
+                var disabled = WebSearch.Defaults();
+                disabled[0].Enabled = false;
+                if (WebSearch.TryMatchAlias("g x", disabled, out engine, out query)) return "禁用引擎不应触发别名";
+
+                if (!WebSearch.IsAliasValid("")) return "空别名应合法";
+                if (WebSearch.IsAliasValid("g x")) return "含空格别名应非法";
+                if (WebSearch.AliasConflict("BD", null, engines) == null) return "别名唯一性应不分大小写";
+                return null;
+            }));
+
+            results.Add(Test("网页搜索：URL 拼接（编码 / 无 %s 直开 / 非法模板拒绝）", () =>
+            {
+                var google = new WebSearchEngine { Name = "Google", Url = "https://www.google.com/search?q=%s" };
+                string url, error;
+                if (!WebSearch.TryBuildUrl(google, "a b&c", out url, out error)) return "合法模板应拼出 URL: " + error;
+                if (url != "https://www.google.com/search?q=a%20b%26c") return "编码不符: " + url;
+
+                var chat = new WebSearchEngine { Name = "Chat", Url = "https://chat.deepseek.com/" };
+                if (!WebSearch.TryBuildUrl(chat, "随便说点什么", out url, out error)) return "无 %s 模板应原样放行: " + error;
+                if (url != "https://chat.deepseek.com/") return "无 %s 应原样返回: " + url;
+
+                if (WebSearch.TryBuildUrl(new WebSearchEngine { Url = "ftp://x" }, "q", out url, out error))
+                    return "非 http(s) 模板应拒绝";
+                if (WebSearch.TryBuildUrl(new WebSearchEngine { Url = "" }, "q", out url, out error))
+                    return "空模板应拒绝";
+                if (error != "搜索地址为空") return "错误文案不符: " + error;
+                return null;
+            }));
+
+            results.Add(Test("网页搜索：URL 直开判定（仅 http/https 前缀，不做域名模糊判定）", () =>
+            {
+                if (!WebSearch.IsUrl("https://example.com/a?b=1")) return "https URL 应识别";
+                if (!WebSearch.IsUrl("http://intranet.local")) return "http URL 应识别";
+                if (WebSearch.IsUrl("www.example.com")) return "裸域名不应识别";
+                if (WebSearch.IsUrl("ftp://example.com")) return "ftp 不应识别";
+                if (WebSearch.IsUrl("https://exa mple.com")) return "含空格不应识别";
+                if (WebSearch.IsUrl("cmd")) return "普通词不应识别";
+
+                var entry = WebSearch.BuildUrlEntry("https://example.com/x");
+                if (!entry.IsCommand || entry.CommandId != "web-open" || entry.CommandArg != "https://example.com/x")
+                    return "URL 直开条目未带命令参数";
+                if (entry.Name != "用浏览器打开") return "URL 直开条目标题不符: " + entry.Name;
+                return null;
+            }));
+
+            results.Add(Test("网页搜索：兜底条目（默认引擎在前 / 禁用不出现 / 空查询不出条目）", () =>
+            {
+                var engines = WebSearch.Defaults();
+                engines[2].Enabled = true; // Bing 也算上，校验默认引擎排首
+                var entries = WebSearch.BuildFallbackEntries(engines, "百度", "cmd");
+                if (entries.Count != 3) return "启用 3 个引擎应出 3 条，实际 " + entries.Count;
+                if (entries[0].Name.IndexOf("百度", StringComparison.Ordinal) < 0) return "默认引擎应排最前: " + entries[0].Name;
+                if (entries[0].CommandId != "web-open" || !WebSearch.IsUrl(entries[0].CommandArg)) return "条目应带可打开的 URL";
+                if (entries[0].TargetPath.IndexOf("默认", StringComparison.Ordinal) < 0) return "默认引擎副标题应标「默认」";
+
+                if (WebSearch.BuildFallbackEntries(engines, "百度", "   ").Count != 0) return "空查询不应出兜底条目";
+
+                engines[0].Enabled = false;
+                foreach (var entry in WebSearch.BuildFallbackEntries(engines, "百度", "cmd"))
+                    if (entry.Name.IndexOf("Google", StringComparison.Ordinal) >= 0) return "禁用引擎不应出现";
+                return null;
+            }));
+
+            results.Add(Test("网页搜索：未完成的引擎行不参与（别名/兜底，新增空行场景）", () =>
+            {
+                var engines = WebSearch.Defaults();
+                engines.Add(new WebSearchEngine { Name = "", Alias = "new", Url = "", Enabled = true });   // 全空新行
+                engines.Add(new WebSearchEngine { Name = "",   Alias = "u",  Url = "https://a.example.com/?q=%s", Enabled = true }); // 只填了地址
+
+                WebSearchEngine hit; string query;
+                if (WebSearch.TryMatchAlias("new x", engines, out hit, out query)) return "URL 未填的新行不应触发别名";
+                if (WebSearch.TryMatchAlias("u x", engines, out hit, out query)) return "名称未填的行不应触发别名";
+                if (!WebSearch.TryMatchAlias("g x", engines, out hit, out query)) return "预置引擎不应受影响";
+                if (hit.Name != "Google") return "命中引擎不符: " + hit.Name;
+
+                var entries = WebSearch.BuildFallbackEntries(engines, "Google", "cmd");
+                foreach (var entry in entries)
+                    if (entry.Name.IndexOf("a.example.com", StringComparison.Ordinal) >= 0 || entry.Name.Trim() == "用  搜索「cmd」")
+                        return "名称未填的行不应出现在兜底条目: " + entry.Name;
+                if (entries.Count != 2) return "应只有 2 个有效引擎出条目，实际 " + entries.Count;
+                return null;
+            }));
+
+            results.Add(Test("网页搜索：配置往返（引擎表 ArrayList 解析 / 开关 / 默认引擎 / 删空不回落预置）", () =>
+            {
+                var path = Path.Combine(Path.GetTempPath(), "pytools-selftest-" + Guid.NewGuid().ToString("N") + ".json");
+                try
+                {
+                    var cfg = AppConfig.Load(path);
+                    if (cfg.WebSearchEnabled) return "网页搜索默认应关闭";
+                    if (cfg.WebSearchEngines.Count != 3) return "未配置时应回预置 3 个引擎，实际 " + cfg.WebSearchEngines.Count;
+
+                    cfg.WebSearchEnabled = true;
+                    cfg.WebSearchEngines[1].Alias = "baidu";
+                    cfg.WebSearchEngines[2].Enabled = true;
+                    cfg.WebSearchDefault = "百度";
+                    cfg.SaveWebSearch();
+
+                    var reloaded = AppConfig.Load(path);
+                    if (!reloaded.WebSearchEnabled) return "开关未持久化";
+                    if (reloaded.WebSearchEngines.Count != 3) return "引擎表未持久化，实际 " + reloaded.WebSearchEngines.Count;
+                    if (reloaded.WebSearchEngines[1].Alias != "baidu") return "别名未持久化";
+                    if (!reloaded.WebSearchEngines[2].Enabled) return "启用状态未持久化";
+                    if (reloaded.WebSearchDefault != "百度") return "默认引擎未持久化: " + reloaded.WebSearchDefault;
+
+                    reloaded.WebSearchEngines.Clear();
+                    reloaded.SaveWebSearch();
+                    if (AppConfig.Load(path).WebSearchEngines.Count != 0) return "删空后不应回落预置";
+                    return null;
+                }
+                finally { try { File.Delete(path); } catch { } }
+            }));
+
             var failed = 0;
             var lines = new List<string>();
             foreach (var r in results)
