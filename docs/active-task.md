@@ -907,3 +907,16 @@ v1 缺陷（2026-11-04 实测）闭环：Electron `setLoginItemSettings` 的 Run
 - M3 设计稿：`docs/v2-m3-design.md`（14 节，剪贴板历史全部定案）
 
 新需求先在本文件记录需求、方案、步骤和验证方式；需求确认与开始编码是两个独立关口，用户明确确认后才改源码。
+
+## Win11 新右键菜单调研（2026-11-20，结论存档，**暂缓实施**）
+
+**背景**：用户 Win11 机器上勾选「右键添加到 PyTools」后新菜单不出现，且 26H2 起「显示更多选项」默认也不提供。
+
+**查证结论**：
+- 第三方进 Win11 新右键菜单（一级）唯一受支持路径：`IExplorerCommand` COM DLL + 包标识（完整 MSIX 或稀疏包，`windows.fileExplorerContextMenus` 清单扩展，`comServer` 注册 CLSID；PowerToys 同款）。
+- 传统注册表 verb（当前 `ContextMenuRegistry` 写的 HKCU\...\shell\AddToPyTools）只进旧版菜单；26H2（KB5127936，2026-11 推送）起新菜单可自定义但旧版菜单默认隐藏，注册表条目需在「设置 → 个性化 → 右键菜单」手动启用才可见。
+- 技术栈可行性：**可以支持**——有 .NET Framework 4.8 托管 COM DLL 实现 IExplorerCommand 的开源先例（GitHub IExplorerCommand-Template）；打包 COM 激活跑 dllhost 代理进程，规避托管代码进 explorer.exe 的经典担忧；makeappx/signtool 仅构建期需要（Windows SDK），不破零运行时依赖。
+- 代价三条：① 交付物单 exe →「exe + x64 COM DLL + 稀疏包 msix」三件套（DLL 须 x64 且内嵌 MSIX identity manifest，踩坑点：缺了 Explorer 不加载）；② 装签名证书需一次管理员（asInvoker 破例；内网企业 CA 已受信可免）；③ Invoke 实现为拉起 `PyTools.exe --add-app=<选中路径>`，运行时按系统版本分流（Win10 1709 无新菜单，旧注册表路径必须保留）。
+- 短期验证路径（未做）：在 26H2 机器「设置 → 个性化 → 右键菜单」启用第三方子菜单，确认注册表条目可找回。
+
+**状态**：暂缓（2026-11-23 用户决定）。重新启动时从本节读结论，无需重查。
