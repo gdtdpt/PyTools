@@ -356,8 +356,10 @@ namespace PyTools.Views
                 if (count > 0) { ActivateAt(SelectedIndex()); e.Handled = true; }
                 return;
             }
-            if (!isCtrl && (e.Key >= Key.D0 && e.Key <= Key.D9 || e.Key >= Key.NumPad0 && e.Key <= Key.NumPad9))
+            if (isCtrl && (e.Key >= Key.D0 && e.Key <= Key.D9 || e.Key >= Key.NumPad0 && e.Key <= Key.NumPad9))
             {
+                // Ctrl+数字 1-0 选中当前可视区第 1-10 条（0 = 第 10 个），仅选中不启动（回车确认），与启动器/剪贴板同一条规则；
+                // 裸数字放行进过滤框（2026-11-24 恢复 v1 语义）
                 if (count > 0)
                 {
                     var digit = (int)((e.Key >= Key.NumPad0 && e.Key <= Key.NumPad9)
@@ -365,7 +367,7 @@ namespace PyTools.Views
                         : e.Key - Key.D0);
                     var position = digit == 0 ? 9 : digit - 1;
                     var index = ListBadgeHelper.FirstVisibleIndex(PART_List, _scroll, count) + position;
-                    if (index < count) ActivateAt(index);
+                    if (index < count) SetSelected(index);
                     e.Handled = true;
                 }
             }

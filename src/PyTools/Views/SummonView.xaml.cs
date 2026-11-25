@@ -578,9 +578,11 @@ namespace PyTools.Views
                 if (listVisible && SelectedIndex() >= 0) { ActivateAt(SelectedIndex()); e.Handled = true; }
                 return;
             }
-            if (!isCtrl && (e.Key >= Key.D0 && e.Key <= Key.D9 || e.Key >= Key.NumPad0 && e.Key <= Key.NumPad9))
+            if (isCtrl && (e.Key >= Key.D0 && e.Key <= Key.D9 || e.Key >= Key.NumPad0 && e.Key <= Key.NumPad9))
             {
-                // 数字键 1-0 映射当前可视区第 1-10 条（0 = 第 10 个），滚到哪都对可见行生效；无结果时放行给搜索框
+                // Ctrl+数字 1-0 选中当前可视区第 1-10 条（0 = 第 10 个），滚到哪都对可见行生效；
+                // 仅选中不启动（回车确认）——恢复 v1 语义，裸数字放行进输入框（2026-11-24，形态二）。
+                // 无列表时不消费：Ctrl+数字落空，不干扰其它场景。
                 if (listVisible && count > 0)
                 {
                     var digit = (int)((e.Key >= Key.NumPad0 && e.Key <= Key.NumPad9)
@@ -588,10 +590,11 @@ namespace PyTools.Views
                         : e.Key - Key.D0);
                     var position = digit == 0 ? 9 : digit - 1;
                     var index = FirstVisibleIndex() + position;
-                    if (index < count) { ActivateAt(index); }
-                    e.Handled = true; // 有结果时数字键不进搜索框（v1 语义）
+                    if (index < count) SetSelected(index);
+                    e.Handled = true;
                 }
             }
+            // 裸数字不再拦截：一律进搜索框（数字查询 / 网页搜索兜底场景，v1 原语义）
         }
 
         private int SelectedIndex()
